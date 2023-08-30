@@ -262,6 +262,7 @@ PetscErrorCode GetDikeContr(ConstEqCtx *ctx,
   PetscScalar  v_spread, M, left, right, front, back;
   PetscScalar  y_distance, tempdikeRHS;
 
+
   PetscFunctionBeginUser;
 
   numDike    = ctx->numDike;
@@ -757,7 +758,7 @@ if (((istep % nstep_out) == 0) && (dike->out_stress > 0))
 	{
 		// Form the filename based on jr->ts->istep+1
 		std::ostringstream oss;
-		oss << "gsxx_Timestep_" << (jr->ts->istep) << ".txt";
+		oss << "gsxx_Timestep_" << (jr->ts->istep + 1) << ".txt";
 
 		std::string filename = oss.str();
 
@@ -1316,7 +1317,7 @@ if (((istep % nstep_out) == 0) && (dike->out_stress > 0))
 	{
 		// Form the filename based on jr->ts->istep+1
 		std::ostringstream oss;
-		oss << "smooth_gsxx_Timestep_" << (jr->ts->istep) << ".txt";
+		oss << "smooth_gsxx_Timestep_" << (jr->ts->istep + 1) << ".txt";
 
 		std::string filename = oss.str();
 
@@ -1486,9 +1487,9 @@ PetscErrorCode Set_dike_zones(JacRes *jr, PetscInt nD, PetscInt nPtr, PetscInt j
 
     if (L==0 &&  ((istep % nstep_out) == 0) && (dike->out_dikeloc > 0))
     {
-      // Form the filename based on jr->ts->istep
+      // Form the filename based on jr->ts->istep+1
       std::ostringstream oss;
-      oss << "dikeloc_Timestep_" << (jr->ts->istep) << ".txt";
+      oss << "dikeloc_Timestep_" << (jr->ts->istep + 1) << ".txt";
 
       std::string filename = oss.str();
 
