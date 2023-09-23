@@ -323,6 +323,7 @@ PetscErrorCode GetDikeContr(JacRes *jr,
   PetscMPIInt rank;
   //
 
+
   PetscFunctionBeginUser;
 
 // *revisit (can this stuff be called from jr like in Dike_k_heatsource?? if not use dikeContr_temp to fix)
@@ -874,7 +875,7 @@ if (((istep % nstep_out) == 0) && (dike->out_stress > 0))
 	{
 		// Form the filename based on jr->ts->istep+1
 		std::ostringstream oss;
-		oss << "gsxx_Timestep_" << (jr->ts->istep) << ".txt";
+		oss << "gsxx_Timestep_" << (jr->ts->istep + 1) << ".txt";
 
 		std::string filename = oss.str();
 
@@ -1400,40 +1401,41 @@ if (jc<j && dalong<=filty) //if south of current point
    ierr = DMDAVecRestoreArray(jr->DA_CELL_2D_tave, dike->sxx_eff_ave_hist, &gsxx_eff_ave_hist); CHKERRQ(ierr);
   }// end if nstep_ave>1
 
-  // output smoothed stress array to .txt file on timesteps of other output *djking
-  if (((istep % nstep_out) == 0) && (dike->out_stress > 0))
-  {
-    if (L == 0)
+
+// output smoothed stress array to .txt file on timesteps of other output *djking
+if (((istep % nstep_out) == 0) && (dike->out_stress > 0))
+{
+	if (L == 0)
+	{
+		// Form the filename based on jr->ts->istep+1
+		std::ostringstream oss;
+		oss << "smooth_gsxx_Timestep_" << (jr->ts->istep + 1) << ".txt";
+
+    std::string filename = oss.str();
+ 
+    // Open a file with the formed filename
+    std::ofstream outFile(filename);
+    if (outFile)
     {
-      // Form the filename based on jr->ts->istep+1
-      std::ostringstream oss;
-      oss << "smooth_gsxx_Timestep_" << (jr->ts->istep) << ".txt";
+      START_PLANE_LOOP
+      xc = COORD_CELL(i, sx, fs->dsx);
+      yc = COORD_CELL(j, sy, fs->dsy);
+ 
+      // Writing space delimited data
+      outFile
+        << " " << xc << " " << yc 
+        << " " << gsxx_eff_ave[L][j][i] 
+        << " " << magPressure[L][j][i] 
+        << " " << nD << " " << dike->istep_count << "\n";    
 
-      std::string filename = oss.str();
-
-      // Open a file with the formed filename
-      std::ofstream outFile(filename);
-      if (outFile)
-      {
-        START_PLANE_LOOP
-        xc = COORD_CELL(i, sx, fs->dsx);
-        yc = COORD_CELL(j, sy, fs->dsy);
-
-        // Writing space delimited data
-        outFile
-          << " " << xc << " " << yc 
-          << " " << gsxx_eff_ave[L][j][i] 
-          << " " << magPressure[L][j][i] 
-          << " " << nD << " " << dike->istep_count << "\n";    
-
-        END_PLANE_LOOP
-      }
-      else
-      {
-        std::cerr << "Error creating file: " << filename << std::endl;
-      }
+      END_PLANE_LOOP
     }
-  }  
+    else
+    {
+      std::cerr << "Error creating file: " << filename << std::endl;
+    }
+  }
+}  
 
   //restore arrays
   ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, dike->sxx_eff_ave, &gsxx_eff_ave); CHKERRQ(ierr);
@@ -1554,9 +1556,9 @@ PetscErrorCode Set_dike_zones(JacRes *jr, PetscInt nD, PetscInt nPtr, PetscInt j
     // dike location to .txt file on timesteps of other output *djking
     if (L==0 &&  ((istep % nstep_out) == 0) && (dike->out_dikeloc > 0))
     {
-      // Form the filename based on jr->ts->istep
+      // Form the filename based on jr->ts->istep+1
       std::ostringstream oss;
-      oss << "dikeloc_Timestep_" << (jr->ts->istep) << ".txt";
+      oss << "dikeloc_Timestep_" << (jr->ts->istep + 1) << ".txt";
 
       std::string filename = oss.str();
 
