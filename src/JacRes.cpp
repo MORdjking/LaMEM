@@ -280,7 +280,7 @@ PetscErrorCode JacResCreate(JacRes *jr, FB *fb)
 	if(ctrl->Passive_Tracer) PetscPrintf(PETSC_COMM_WORLD, "   Passive Tracers are active              @ \n");
 	if(ctrl->useTk)          PetscPrintf(PETSC_COMM_WORLD, "   Use Temperature-dependent conductivity  @ \n");
 	if(ctrl->useTDk)         PetscPrintf(PETSC_COMM_WORLD, "   Use Temperature and Depth-dependent conductivity  @ \n");
-	if(ctrl->useDk)         PetscPrintf(PETSC_COMM_WORLD, "    Use Depth-dependent conductivity  @ \n");
+	if(ctrl->useDk)          PetscPrintf(PETSC_COMM_WORLD, "    Use Depth-dependent conductivity  @ \n");
 	PetscPrintf(PETSC_COMM_WORLD, "   Ground water level type                 : ");
 	if     (ctrl->gwType == _GW_NONE_)  PetscPrintf(PETSC_COMM_WORLD, "none \n");
 	else if(ctrl->gwType == _GW_TOP_)   PetscPrintf(PETSC_COMM_WORLD, "top of the domain \n");
@@ -419,7 +419,8 @@ PetscErrorCode JacResCreateData(JacRes *jr)
 
 	// continuity residual
 	ierr = DMCreateGlobalVector(fs->DA_CEN, &jr->gc); CHKERRQ(ierr);
-	ierr = DMCreateGlobalVector(fs->DA_CEN, &jr->dc); CHKERRQ(ierr); // dikeRHS contribution
+	ierr = DMCreateGlobalVector(fs->DA_CEN, &jr->dc); CHKERRQ(ierr);
+
 
 	// corner buffer
 	ierr = DMCreateLocalVector(fs->DA_COR,  &jr->lbcor); CHKERRQ(ierr);
@@ -1096,13 +1097,9 @@ PetscErrorCode JacResGetResidual(JacRes *jr)
 	SolVarCell *svCell;
 	SolVarEdge *svEdge;
 	ConstEqCtx  ctx;
-	Dike       *dike;
-	Discret1D  *dsz;	
 	PetscInt    iter, fssa_allVel;
 	PetscInt    I1, I2, J1, J2, K1, K2;
 	PetscInt    i, j, k, nx, ny, nz, sx, sy, sz, mx, my, mz, mcx, mcy, mcz;
-	PetscInt    nD, L;
-	PetscScalar ***gsxx_eff_ave, sxx_eff_ave_cell;
 	PetscScalar XX, XX1, XX2, XX3, XX4;
 	PetscScalar YY, YY1, YY2, YY3, YY4;
 	PetscScalar ZZ, ZZ1, ZZ2, ZZ3, ZZ4;
@@ -1123,10 +1120,6 @@ PetscErrorCode JacResGetResidual(JacRes *jr)
 	// access context
 	fs = jr->fs;
 	bc = jr->bc;
-
-	// establishing z rank for diking
-	dsz = &fs->dsz;
-	L   =  (PetscInt)dsz->rank;
 
 	// initialize index bounds
 	mcx = fs->dsx.tcels - 1;
@@ -1183,13 +1176,6 @@ PetscErrorCode JacResGetResidual(JacRes *jr)
 	GET_CELL_RANGE(ny, sy, fs->dsy)
 	GET_CELL_RANGE(nz, sz, fs->dsz)
 
-	if (jr->ctrl.actDike && jr->ctrl.var_M)
-	{
-		nD = 0; // sets dike number to 0 for calculation of sxx_eff_ave across entire domain
-		dike = jr->dbdike->matDike + nD;
-		PetscCall(DMDAVecGetArray(jr->DA_CELL_2D, dike->sxx_eff_ave, &gsxx_eff_ave));
-	}
-
 	START_STD_LOOP
 	{
 		// access solution variables
@@ -1200,28 +1186,25 @@ PetscErrorCode JacResGetResidual(JacRes *jr)
 		//=================
 		if (jr->ctrl.actDike)
 		{
-		  y_c = COORD_CELL(j,sy,fs->dsy);
-		
-		  dikeRHS = 0.0;
+			y_c = COORD_CELL(j, sy, fs->dsy);
+			dikeRHS = 0.0;
 
-		  // function that computes dikeRHS (additional divergence due to dike) depending on the phase ratio
-		  if (jr->ctrl.var_M)
-		  {
-		  	sxx_eff_ave_cell = gsxx_eff_ave[L][j][i];
-		    ierr = GetDikeContr(jr, svCell->phRat, jr->surf->AirPhase, dikeRHS, y_c, j-sy, sxx_eff_ave_cell);  CHKERRQ(ierr);
-		  }
-		  else
-		  {
-		  	ierr = GetDikeContr(jr, svCell->phRat, jr->surf->AirPhase, dikeRHS, y_c, j-sy, 1.0);  CHKERRQ(ierr);
-		  }
-		  
-		  // remove dike contribution to strain rate from deviatoric strain rate (for xx, yy and zz components) prior to computing momentum equation
-		  dxx[k][j][i] -= (2.0/3.0) * dikeRHS;
-		  dyy[k][j][i] -= - (1.0/3.0) * dikeRHS;
-		  dzz[k][j][i] -= - (1.0/3.0) * dikeRHS;
-		
-		  // save global dike divergence for debug output
-		  div_dike[k][j][i] = dikeRHS;
+			if (jr->ctrl.var_M)
+			{
+				ierr = GetDikeContrVarM(jr, svCell->phRat, jr->surf->AirPhase, dikeRHS, i - sx, j - sy); CHKERRQ(ierr);
+			}
+			else
+			{
+				ierr = GetDikeContr(jr, svCell->phRat, jr->surf->AirPhase, dikeRHS, y_c, j - sy); CHKERRQ(ierr);
+			}
+
+			// remove dike contribution to strain rate from deviatoric strain rate (for xx, yy and zz components) prior to computing momentum equation
+			dxx[k][j][i] -= (2.0 / 3.0) * dikeRHS;
+			dyy[k][j][i] -= -(1.0 / 3.0) * dikeRHS;
+			dzz[k][j][i] -= -(1.0 / 3.0) * dikeRHS;
+
+			// save global dike divergence for debug output
+			div_dike[k][j][i] = dikeRHS;
 		}
 
 		// access strain rates
@@ -1679,11 +1662,6 @@ PetscErrorCode JacResGetResidual(JacRes *jr)
 	ierr = DMDAVecRestoreArray(fs->DA_CEN, jr->lp_pore, &p_pore);   CHKERRQ(ierr);
 	ierr = DMDAVecRestoreArray(fs->DA_CEN, bc->bcp,     &bcp);      CHKERRQ(ierr);
 	ierr = DMDAVecRestoreArray(fs->DA_CEN, jr->dc,      &div_dike); CHKERRQ(ierr);
-
-	if (jr->ctrl.actDike && jr->ctrl.var_M)
-	{
-		PetscCall(DMDAVecRestoreArray(jr->DA_CELL_2D, dike->sxx_eff_ave, &gsxx_eff_ave));
-	}
 
 	// assemble global residuals from local contributions
 	LOCAL_TO_GLOBAL(fs->DA_X, jr->lfx, jr->gfx)

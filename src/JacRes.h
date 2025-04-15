@@ -277,7 +277,8 @@ struct JacRes
 	//==================================
 	// For 1D arrays
 	//==================================
-	DM DA_CELL_1D; // 1D cell center grid
+	DM DA_CELL_1D; // 1D grid for y-direction (this is ny+1 since it uses nodes, fs->dsy.tnods)
+	DM DA_CELL_Y1D; // 1D cell center in Y
 };
 //---------------------------------------------------------------------------
 

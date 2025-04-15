@@ -118,8 +118,13 @@ PetscErrorCode DBDikeCreate(DBPropDike *dbdike, DBMat *dbm, FB *fb, JacRes *jr, 
 											fs->dsx.tcels, fs->dsy.tcels, fs->dsz.nproc * dike->istep_nave,
 											fs->dsx.nproc, fs->dsy.nproc, fs->dsz.nproc, 1, 1,
 											0, 0, 0, &jr->DA_CELL_2D_tave));
-			}
 
+				// DM for 1D cell center vector along the Y dimension (for VarM *djking)
+				PetscCall(DMDACreate3dSetUp(PETSC_COMM_WORLD, DM_BOUNDARY_NONE, DM_BOUNDARY_NONE, DM_BOUNDARY_NONE, DMDA_STENCIL_BOX,
+											fs->dsx.nproc, fs->dsy.tcels, fs->dsz.nproc,
+											fs->dsx.nproc, fs->dsy.nproc, fs->dsz.nproc, 1, 1,
+											0, 0, 0, &jr->DA_CELL_Y1D));
+			}
 
 			// creating local vectors and inializing the history vector
 			PetscCall(DMCreateLocalVector(jr->DA_CELL_2D, &dike->magPressure));
@@ -133,7 +138,11 @@ PetscErrorCode DBDikeCreate(DBPropDike *dbdike, DBMat *dbm, FB *fb, JacRes *jr, 
 
 			PetscCall(DMCreateLocalVector(jr->DA_CELL_2D, &dike->solidus));
 			PetscCall(DMCreateLocalVector(jr->DA_CELL_2D, &dike->magPresence)); // *djking
-			
+
+			PetscCall(DMCreateLocalVector(jr->DA_CELL_Y1D, &dike->cumulativePD)); // *djking
+			PetscCall(DMCreateLocalVector(jr->DA_CELL_2D, &dike->PD));
+			PetscCall(DMCreateLocalVector(jr->DA_CELL_2D, &dike->phratlithavg));
+
 			PetscCall(DMCreateLocalVector(jr->DA_CELL_2D_tave, &dike->sxx_eff_ave_hist));
 			PetscCall(DMCreateLocalVector(jr->DA_CELL_2D_tave, &dike->raw_sxx_ave_hist));
 			PetscCall(DMCreateLocalVector(jr->DA_CELL_2D_tave, &dike->smooth_sxx_ave_hist));
@@ -321,8 +330,7 @@ PetscErrorCode GetDikeContr(JacRes *jr,
 							PetscInt &AirPhase,
 							PetscScalar &dikeRHS,
 							PetscScalar &y_c,
-							PetscInt J,
-							PetscScalar sxx_eff_ave_cell)
+							PetscInt J) // local y-index
 
 {
 
@@ -332,7 +340,6 @@ PetscErrorCode GetDikeContr(JacRes *jr,
 	PetscInt i, nD, nPtr, numDike, numPhtr, nsegs;
 	PetscScalar v_spread, M, left, right, front, back;
 	PetscScalar y_distance, tempdikeRHS;
-	PetscScalar P_comp, div_max, M_rat, zeta;
 
 	PetscFunctionBeginUser;
 
@@ -371,34 +378,10 @@ PetscErrorCode GetDikeContr(JacRes *jr,
 						left = CurrPhTr->celly_xboundL[J];
 						right = CurrPhTr->celly_xboundR[J];
 
-						if (jr->ctrl.var_M && !(dike->const_M > 0))
-						{
-							P_comp = sxx_eff_ave_cell - dike->Ts;
-							M_rat = M; // M ratio *revisit to include global var_M
-							div_max = M_rat * 2 * (v_spread / (right - left));
-
-							if (P_comp > 0) // diking occurs
-							{
-								zeta = dike->A * (dike->zeta_0 / P_comp) + P_comp / div_max;
-								tempdikeRHS = P_comp / zeta;
-							}
-							else // diking DOES NOT occur
-							{
-								tempdikeRHS = 0.0;
-							}
-						}
-						else // not using var_M
-						{
-							tempdikeRHS = M * 2 * v_spread / (right - left);
-						}
+						tempdikeRHS = M * 2 * v_spread / (right - left);
 					}
 					else if (dike->Mc >= 0.0) // Mf, Mc and Mb are all user defined
 					{
-						if (jr->ctrl.var_M && !(dike->const_M > 0)) // check variable M option isn't used
-						{
-							SETERRQ(PETSC_COMM_WORLD, PETSC_ERR_USER, "Invalid option: var_M option requires uniform M");
-						}
-
 						left = CurrPhTr->celly_xboundL[J];
 						right = CurrPhTr->celly_xboundR[J];
 						front = CurrPhTr->ybounds[0];
@@ -422,11 +405,6 @@ PetscErrorCode GetDikeContr(JacRes *jr,
 					}
 					else if (dike->Mb != dike->Mf && dike->Mc < 0.0) // only Mf and Mb, they are different
 					{
-						if (jr->ctrl.var_M && !(dike->const_M > 0)) // check varaible M option isn't used
-						{
-							SETERRQ(PETSC_COMM_WORLD, PETSC_ERR_USER, "Invalid option: var_M option requires uniform M");
-						}
-
 						left = CurrPhTr->celly_xboundL[J];
 						right = CurrPhTr->celly_xboundR[J];
 						front = CurrPhTr->ybounds[0];
@@ -444,14 +422,356 @@ PetscErrorCode GetDikeContr(JacRes *jr,
 					}
 
 					// Divergence
-					dikeRHS += (phRat[i] + phRat[AirPhase]) * tempdikeRHS; // Give full divergence if cell is part dike part air (*revisit Why??)
+					dikeRHS += (phRat[i] + phRat[AirPhase]) * tempdikeRHS; // Give full divergence if cell is part dike part air
 
 				} // close if phRat and xboundR>xboundL
-			}	  // close phase transition and dike phase ID comparison
-		}		  // close dike block loop
-	}			  // close phase transition block loop
+			} // close phase transition and dike phase ID comparison
+		} // close dike block loop
+	} // close phase transition block loop
 	PetscFunctionReturn(0);
 }
+
+//------------------------------------------------------------------------------------------------------------------
+PetscErrorCode AccumulatedDikingPressure(JacRes *jr,
+                                         Dike *dike,
+                                         PetscInt j1,
+                                         PetscInt j2)
+{
+    FDSTAG      *fs;
+	Discret1D   *dsz;
+	PetscInt i, j, sx, sy, nx, ny, L;
+    PetscScalar ***PDArray, **phratlithavgArray;
+	PetscScalar **cumulativePDArray, w_e, phratlith;
+    PetscMPIInt rank;
+
+    PetscFunctionBeginUser;
+
+    MPI_Comm_rank(PETSC_COMM_WORLD, &rank);
+
+	fs  =  jr->fs;
+	dsz = &fs->dsz;
+	L   =  (PetscInt)dsz->rank;
+
+    // Access local portions of the vectors
+    PetscCall(DMDAVecGetArray(jr->DA_CELL_2D, dike->PD, &PDArray));
+    PetscCall(DMDAVecGetArray(jr->DA_CELL_Y1D, dike->cumulativePD, &cumulativePDArray));
+	PetscCall(DMDAVecGetArray(jr->DA_CELL_2D, dike->phratlithavg, &phratlithavgArray));
+
+    // Get local grid sizes for loop bounds
+    PetscCall(DMDAGetCorners(jr->DA_CELL_2D, &sx, &sy, NULL, &nx, &ny, NULL));
+
+    // Zero out cumulativePDArray
+    for (j = j1; j <= j2; j++) {
+        cumulativePDArray[L][j] = 0.0;
+    }
+
+	// Print initial state of PDArray across all ranks to verify values are as expected
+	if (L == 0)
+	{
+		PetscPrintf(PETSC_COMM_WORLD, "\n[Rank %d] Initial PDArray values for each j (local to this rank):\n", rank);
+		START_PLANE_LOOP
+		if (j == 0)
+		{ // Print only for j = 0 to avoid overwhelming output
+			PetscPrintf(PETSC_COMM_WORLD, "PDArray[%d][%d] = %g\n", j, i, (double)PDArray[L][j][i]);
+		}
+		END_PLANE_LOOP
+	}
+	// Print the cumulativePDArray initial values (should be zeroed out)
+    PetscPrintf(PETSC_COMM_WORLD, "[Rank %d] Initial cumulativePDArray values (before accumulation):\n", rank);
+    for (j = j1; j <= j2; j++) {
+        PetscPrintf(PETSC_COMM_WORLD, "cumulativePDArray[%d] = %g\n", j, (double)cumulativePDArray[L][j]);
+    }
+
+    // Accumulate PDArray values into cumulativePDArray within the range [j1, j2]
+    PetscPrintf(PETSC_COMM_WORLD, "[Rank %d] Accumulating PDArray into cumulativePDArray within j1 to j2\n", rank);
+    for (j = j1; j <= j2; j++) {
+        for (i = sx; i < sx + nx; i++) {
+            w_e = SIZE_CELL(i, sx, fs->dsx);
+			phratlith = phratlithavgArray[j][i];
+			cumulativePDArray[L][j] += PDArray[L][j][i]; // kept simple for testing
+            // cumulativePDArray[j] += PDArray[j][i] * w_e * phratlith;
+        }
+    }
+
+    // Print cumulativePDArray after local accumulation (before MPI reduction)
+    PetscPrintf(PETSC_COMM_WORLD, "[Rank %d] cumulativePDArray values after local accumulation (before MPI reduction):\n", rank);
+    for (j = j1; j <= j2; j++) {
+        PetscPrintf(PETSC_COMM_WORLD, "cumulativePDArray[%d] = %g\n", j, (double)cumulativePDArray[j]);
+    }
+
+    // MPI reduction for consistency across processes
+    PetscPrintf(PETSC_COMM_WORLD, "[Rank %d] Starting MPI reduction on cumulativePDArray...\n", rank);
+    PetscScalar globalSum;
+    for (j = j1; j <= j2; j++) {
+        MPI_Allreduce(&cumulativePDArray[j], &globalSum, 1, MPIU_SCALAR, MPI_SUM, PETSC_COMM_WORLD);
+        cumulativePDArray[j] = globalSum;
+    }
+
+    // Print final cumulativePDArray values after MPI reduction
+    PetscPrintf(PETSC_COMM_WORLD, "[Rank %d] Final cumulativePDArray values (after MPI reduction):\n", rank);
+    for (j = j1; j <= j2; j++) {
+        PetscPrintf(PETSC_COMM_WORLD, "cumulativePDArray[%d] = %g\n", j, (double)cumulativePDArray[j]);
+    }
+
+    // Restore arrays after use
+    PetscCall(DMDAVecRestoreArray(jr->DA_CELL_2D, dike->PD, &PDArray));
+    PetscCall(DMDAVecRestoreArray(jr->DA_CELL_Y1D, dike->cumulativePD, &cumulativePDArray));
+	PetscCall(DMDAVecRestoreArray(jr->DA_CELL_2D, dike->phratlithavg, &phratlithavgArray));
+
+    PetscFunctionReturn(0);
+}
+
+
+/* //------------------------------------------------------------------------------------------------------------------
+PetscErrorCode AccumulatedDikingPressure(JacRes *jr,
+										 Dike *dike,
+										 PetscInt j1,
+										 PetscInt j2)
+{
+	PetscInt i, j, sx, sy, nx, ny;
+	PetscScalar **PDArray, *cumulativePDArray;
+
+	PetscFunctionBeginUser;
+
+	// Access local portions of the vectors
+	PetscCall(DMDAVecGetArray(jr->DA_CELL_2D, dike->PD, &PDArray));
+	PetscCall(DMDAVecGetArray(jr->DA_CELL_Y1D, dike->cumulativePD, &cumulativePDArray));
+
+    // Zero out the entire cumulative PD array to ensure any unused cells are zeroed
+    PetscCall(DMDAGetCorners(jr->DA_CELL_Y1D, NULL, &sy, NULL, NULL, &ny, NULL));
+	for (j = sy; j < sy + ny; j++) 
+    {
+        cumulativePDArray[j] = 0.0;
+    }
+
+	// Get local grid sizes for loop bounds
+	PetscCall(DMDAGetCorners(jr->DA_CELL_2D, &sx, &sy, NULL, &nx, &ny, NULL));
+
+	for (j = sy; j < sy + ny; j++) 
+	{
+		for (i = sx; i < sx + nx; i++)
+		{
+			PetscPrintf(PETSC_COMM_WORLD, "PDArray[%d][%d] = %g\n", j, i, (double)PDArray[j][i]);
+			cumulativePDArray[j] += PDArray[j][i]; // Sum PD across i for each j
+		}
+	}
+
+	// Global reduction for cumulativePD to ensure consistency
+	PetscScalar globalSum;
+	for (j = sy; j < sy + ny; j++) 
+	{
+		MPI_Allreduce(&cumulativePDArray[j], &globalSum, 1, MPIU_SCALAR, MPI_SUM, PETSC_COMM_WORLD);
+		cumulativePDArray[j] = globalSum;
+		PetscPrintf(PETSC_COMM_WORLD, "cumulativePDArray[%d] = %g\n", j, (double)cumulativePDArray[j]);
+	}
+
+	// Restore arrays after use
+	PetscCall(DMDAVecRestoreArray(jr->DA_CELL_2D, dike->PD, &PDArray));
+	PetscCall(DMDAVecRestoreArray(jr->DA_CELL_Y1D, dike->cumulativePD, &cumulativePDArray));
+
+	PetscFunctionReturn(0);
+} */
+
+/* //------------------------------------------------------------------------------------------------------------------
+PetscErrorCode AccumulatedDikingPressure(JacRes *jr,
+										 Dike *dike,
+										 PetscInt j1,
+										 PetscInt j2)
+{
+	PetscInt i, j, sx, sy, nx, ny;
+	PetscScalar **PDArray, **cumulativePDArray;
+
+	PetscFunctionBeginUser;
+
+	// Access local portions of the vectors
+	PetscCall(DMDAVecGetArray(jr->DA_CELL_2D, dike->PD, &PDArray));
+	PetscCall(DMDAVecGetArray(jr->DA_CELL_2D, dike->cumulativePD, &cumulativePDArray));
+
+	// Zero cumulative PD array locally
+	PetscCall(DMDAGetCorners(jr->DA_CELL_2D, &sx, &sy, NULL, &nx, &ny, NULL));
+
+	// Ensure the bounds j1 and j2 are within the local j range
+	for (j = PetscMax(sy, j1); j <= PetscMin(sy + ny - 1, j2); j++)
+	{
+		cumulativePDArray[j][0] = 0.0; // Initialize cumulative for this j-row
+
+		// Sum PD across i for each j
+		for (i = sx; i < sx + nx; i++)
+		{
+			cumulativePDArray[j][0] += PDArray[j][i];
+		}
+
+		// Perform a global reduction to ensure consistency across processes
+		PetscScalar globalSum;
+		MPI_Allreduce(&cumulativePDArray[j][0], &globalSum, 1, MPIU_SCALAR, MPI_SUM, PETSC_COMM_WORLD);
+
+		// Store the global cumulative value only at i = 0 for this j-row
+		cumulativePDArray[j][0] = globalSum;
+	}
+
+	// Restore arrays after use
+	PetscCall(DMDAVecRestoreArray(jr->DA_CELL_2D, dike->PD, &PDArray));
+	PetscCall(DMDAVecRestoreArray(jr->DA_CELL_2D, dike->cumulativePD, &cumulativePDArray));
+
+	PetscFunctionReturn(0);
+} */
+
+//------------------------------------------------------------------------------------------------------------------
+PetscErrorCode GetDikeContrVarM(JacRes *jr,
+								PetscScalar *phRat, // phase ratios in the control volume
+								PetscInt &AirPhase,
+								PetscScalar &dikeRHS, // cumulative diking pressure contribution
+								PetscInt I,			  // local x index
+								PetscInt J)			  // local y index
+{
+	BCCtx *bc;
+	Dike *dike;
+	Ph_trans_t *CurrPhTr;
+	PetscInt nD, nPtr, numDike, numPhtr;
+	PetscScalar v_spread, M, left, right, w_d, div_max, *cumulativePDArray, **PDArray, zeta, U_local;
+
+	PetscFunctionBeginUser;
+
+	numDike = jr->dbdike->numDike; // number of dikes
+	numPhtr = jr->dbm->numPhtr;	   // number of phase transitions
+	bc = jr->bc;				   // boundary conditions
+
+	for (nPtr = 0; nPtr < numPhtr; nPtr++)
+	{
+		CurrPhTr = jr->dbm->matPhtr + nPtr;
+
+		for (nD = 0; nD < numDike; nD++)
+		{
+			dike = jr->dbdike->matDike + nD;
+
+			// Access arrays from PETSc vectors
+/* 			if (jr->ctrl.initGuess)
+			{
+				PetscCall(VecZeroEntries(dike->PD));
+			} */
+			PetscCall(DMDAVecGetArray(jr->DA_CELL_Y1D, dike->cumulativePD, &cumulativePDArray));
+			PetscCall(DMDAVecGetArray(jr->DA_CELL_2D, dike->PD, &PDArray));
+
+			if (CurrPhTr->ID == dike->PhaseTransID)
+			{
+				// Check if in the dike zone
+				if (phRat[dike->PhaseID] > 0 && CurrPhTr->celly_xboundR[J] > CurrPhTr->celly_xboundL[J])
+				{
+					if (dike->Mb == dike->Mf && dike->Mc < 0.0)
+					{ // spatially constant M
+						M = dike->Mf;
+						v_spread = PetscAbs(bc->velin);
+						left = CurrPhTr->celly_xboundL[J];
+						right = CurrPhTr->celly_xboundR[J];
+						w_d = (right - left); // dike zone width
+						div_max = M * 2 * (v_spread / w_d);
+
+						if (!(dike->const_M > 0))
+						{						  // Handle variable M case
+							PetscScalar P_comp = cumulativePDArray[J]; // cumulative pressure for y-index J
+							zeta = dike->A * (dike->zeta_0 / P_comp) + P_comp / div_max;
+							U_local = P_comp / zeta;
+
+							// Even distribution diking via dilation
+							dikeRHS += U_local / w_d;
+
+							// Proportional distribution dilation
+							dikeRHS += PDArray[J][I] / P_comp * U_local;
+						}
+						else
+						{ // Constant M, no variable M handling
+							dikeRHS += (phRat[dike->PhaseID] + phRat[AirPhase]) * div_max;
+						}
+					}
+					else
+					{
+						SETERRQ(PETSC_COMM_WORLD, PETSC_ERR_USER, "Invalid option: var_M option requires uniform M");
+					}
+				} // End if phRat in zone and within bounds
+			} // End if PhaseTransID matches
+
+			// Restore arrays
+			PetscCall(VecRestoreArray(dike->cumulativePD, &cumulativePDArray));
+			PetscCall(DMDAVecRestoreArray(jr->DA_CELL_2D, dike->PD, &PDArray));
+
+		} // End dike block loop
+	} // End phase transition block loop
+
+	PetscFunctionReturn(0);
+}
+
+/* //------------------------------------------------------------------------------------------------------------------
+PetscErrorCode GetDikeContrVarM(JacRes *jr,
+								PetscScalar *phRat, // phase ratios in the control volume
+								PetscInt &AirPhase,
+								PetscInt J,			  // local y index
+								PetscScalar &dikeRHS) // global cumulative diking pressure vector
+
+{
+    BCCtx *bc;
+    Dike *dike;
+    Ph_trans_t *CurrPhTr;
+    PetscInt nD, nPtr, numDike, numPhtr;
+    PetscScalar v_spread, M, left, right, w_d, div_max, P_comp, zeta, U_local;
+
+    PetscFunctionBeginUser;
+
+    numDike = jr->dbdike->numDike; // number of dikes
+    numPhtr = jr->dbm->numPhtr; // number of phase transitions
+    bc = jr->bc; // boundary conditions
+
+	for (nPtr = 0; nPtr < numPhtr; nPtr++) // loop over all phase transitions blocks
+	{
+		// access the parameters of the phasetranstion block
+		CurrPhTr = jr->dbm->matPhtr + nPtr;
+
+		for (nD = 0; nD < numDike; nD++) // loop through all dike blocks
+		{
+			// access the parameters of the dike depending on the dike block
+			dike = jr->dbdike->matDike + nD;
+
+			if (CurrPhTr->ID == dike->PhaseTransID) // compare the phaseTransID associated with the dike with the actual ID of the phase transition in this cell
+			{
+				// if in the dike zone
+				if (phRat[dike->PhaseID] > 0 && CurrPhTr->celly_xboundR[J] > CurrPhTr->celly_xboundL[J])
+				{
+					if (dike->Mb == dike->Mf && dike->Mc < 0.0) // spatially constant M
+					{
+						M = dike->Mf;
+						v_spread = PetscAbs(bc->velin);
+						left = CurrPhTr->celly_xboundL[J];
+						right = CurrPhTr->celly_xboundR[J];
+
+						if (!(dike->const_M > 0))
+						{
+							w_d = (right - left); // dike zone width
+							div_max = M * 2 * (v_spread / w_d);
+							P_comp = dike->cumulativePD[J]; // access cumulative pressure for y-index J
+							zeta = dike->A * (dike->zeta_0 / P_comp) + P_comp / div_max;
+							U_local = P_comp / zeta;
+
+							// even distribution diking via dilation
+							dikeRHS += U_local / w_d;
+
+							// proportional distribution dilation
+							dikeRHS += dike->PD[j][i] / P_comp * U_local; // no L indexing needed
+						}
+						else // not using var_M
+						{
+							// constant dilation
+							dikeRHS += (phRat[dike->PhaseID] + phRat[AirPhase]) * M * 2 * v_spread / w_d;
+						}
+					}
+					else
+					{
+						SETERRQ(PETSC_COMM_WORLD, PETSC_ERR_USER, "Invalid option: var_M option requires uniform M");
+					}
+				} // close if phRat and xboundR>xboundL
+			} // close phase transition and dike phase ID comparison
+		} // close dike block loop
+	} // close phase transition block loop
+	PetscFunctionReturn(0);
+} */
 
 //-----------------------------------------------------------------------------------------------------------------
 PetscErrorCode Dike_k_heatsource(JacRes *jr,
@@ -472,7 +792,7 @@ PetscErrorCode Dike_k_heatsource(JacRes *jr,
 	PetscInt i, nD, nPtr, numDike, numPhtr, nsegs;
 	PetscScalar v_spread, M, left, right, front, back;
 	PetscScalar y_distance, tempdikeRHS;
-	PetscScalar P_comp, div_max, M_rat, zeta;
+	PetscScalar PD, div_max, M_rat, zeta;
 
 	// heating parameters
 	Material_t *mat;
@@ -518,14 +838,14 @@ PetscErrorCode Dike_k_heatsource(JacRes *jr,
 
 						if (jr->ctrl.var_M && !(dike->const_M > 0))
 						{
-							P_comp = sxx_eff_ave_cell - dike->Ts;
+							PD = sxx_eff_ave_cell - dike->Ts;
 							M_rat = M; // M ratio *revisit
 							div_max = M_rat * 2 * (v_spread / (right - left));
 
-							if (P_comp > 0) // diking occurs
+							if (PD > 0) // diking occurs
 							{
-								zeta = dike->A * (dike->zeta_0 / P_comp) + P_comp / div_max;
-								tempdikeRHS = P_comp / zeta;
+								zeta = dike->A * (dike->zeta_0 / PD) + PD / div_max;
+								tempdikeRHS = PD / zeta;
 							}
 							else // diking DOES NOT occur
 							{
@@ -589,6 +909,7 @@ PetscErrorCode Dike_k_heatsource(JacRes *jr,
 					}
 
 					mat = &phases[i];
+//					tempdikeRHS = jr->dc[L][j][i];
 
 					// adjust k and heat source according to Behn & Ito [2008]
 					if (Tc < mat->T_liq && Tc > mat->T_sol) // partially molten state
@@ -636,7 +957,8 @@ PetscErrorCode Locate_Dike_Zones(AdvCtx *actx)
 	fs = jr->fs;
 	ctrl = &jr->ctrl;
 
-	if (!ctrl->actDike || jr->ts->istep + 1 == 0) PetscFunctionReturn(0); // only execute if diking is activated
+	if (!ctrl->actDike || jr->ts->istep + 1 == 0)
+		PetscFunctionReturn(0); // only execute if diking is activated
 	// if (!ctrl->actDike || !ctrl->sol_track || jr->ts->istep + 1 == 0) PetscFunctionReturn(0); // Solidus tracking outside of diking?? debugging
 
 	PetscPrintf(PETSC_COMM_WORLD, "\n");
@@ -712,17 +1034,23 @@ PetscErrorCode Locate_Dike_Zones(AdvCtx *actx)
 				{
 					ierr = Set_dike_base(jr, nD, nPtr, j1, j2); CHKERRQ(ierr); // use solidus values to set zbound of dike
 				}
+				
+				// get cumulative diking pressure if using var_M
+				if (jr->ctrl.var_M)
+				{
+					ierr = AccumulatedDikingPressure(jr, dike, j1, j2); CHKERRQ(ierr);
+				}
 			}
 		}
 	}
-/*  // Solidus tracking outside of diking?? debugging
-	// Currently requires Tsol which is set in the dike block 
-	else if (jr->ctrl.sol_track) // gets solidus array (as well as average sxx, etc...)
-	{
-		nD = 0;
-		ierr = Compute_sxx_magP(jr, nD); CHKERRQ(ierr); // compute mean effective sxx across the lithosphere
-	} */
-	
+	/*  // Solidus tracking outside of diking?? debugging
+		// Currently requires Tsol which is set in the dike block
+		else if (jr->ctrl.sol_track) // gets solidus array (as well as average sxx, etc...)
+		{
+			nD = 0;
+			ierr = Compute_sxx_magP(jr, nD); CHKERRQ(ierr); // compute mean effective sxx across the lithosphere
+		} */
+
 	PetscFunctionReturn(0);
 }
 
@@ -738,6 +1066,8 @@ PetscErrorCode Compute_sxx_magP(JacRes *jr, PetscInt nD)
   PetscScalar ***sxx, ***Pmag, ***liththick, ***zsol;
   PetscScalar ***solidus, ***magPresence; // *djking
   PetscScalar zsol_max_local = -PETSC_MAX_REAL,  zsol_max_global; // *djking
+  PetscScalar phratlith; // *djking
+  PetscScalar ***surface, ***phratlithavgArray; // *djking
   PetscScalar  *lsxx, *lPmag, *lliththick, *lzsol;
   PetscScalar dz, ***lT, Tc, *grav, Tsol, dPmag, magma_presence;
   PetscInt    i, j, k, sx, sy, sz, nx, ny, nz, L, ID, AirPhase;
@@ -746,6 +1076,7 @@ PetscErrorCode Compute_sxx_magP(JacRes *jr, PetscInt nD)
 
   FDSTAG      *fs;
   Dike        *dike;
+  FreeSurf    *surf;
   Discret1D   *dsz;
   SolVarCell  *svCell;
   Controls    *ctrl;
@@ -759,7 +1090,8 @@ PetscErrorCode Compute_sxx_magP(JacRes *jr, PetscInt nD)
   fs  =  jr->fs;
   dsz = &fs->dsz;
   L   =  (PetscInt)dsz->rank;
-  AirPhase  = jr->surf->AirPhase;
+  surf = jr->surf;
+  AirPhase  = surf->AirPhase;
 
 
   MPI_Comm_rank(PETSC_COMM_WORLD, &rank);
@@ -821,7 +1153,6 @@ PetscErrorCode Compute_sxx_magP(JacRes *jr, PetscInt nD)
   Tsol=dike->Tsol;
   for(k = sz + nz - 1; k >= sz; k--)
   {
-     dz  = SIZE_CELL(k, sz, (*dsz));
      START_PLANE_LOOP
           GET_CELL_ID(ID, i-sx, j-sy, k-sz, nx, ny);  //GET_CELL_ID needs local indices
           svCell = &jr->svCell[ID]; 
@@ -902,7 +1233,7 @@ PetscErrorCode Compute_sxx_magP(JacRes *jr, PetscInt nD)
 	ierr = DMDAVecGetArray(jr->DA_CELL_2D, dike->magPressure, &magPressure); CHKERRQ(ierr);
 	ierr = DMDAVecGetArray(jr->DA_CELL_2D, dike->focused_magPressure, &focused_magPressure); CHKERRQ(ierr); // *djking
 
-	ierr = DMDAVecGetArray(jr->DA_CELL_2D, dike->sxx_eff_ave, &gsxx_eff_ave); CHKERRQ(ierr);
+	ierr = DMDAVecGetArray(jr->DA_CELL_2D, dike->sxx_eff_ave, &gsxx_eff_ave); CHKERRQ(ierr); // testing different options for dilation
 	ierr = DMDAVecGetArray(jr->DA_CELL_2D, dike->raw_sxx, &raw_gsxx); CHKERRQ(ierr);
 	ierr = DMDAVecGetArray(jr->DA_CELL_2D, dike->raw_sxx_ave, &raw_gsxx_ave); CHKERRQ(ierr);
 	ierr = DMDAVecGetArray(jr->DA_CELL_2D, dike->smooth_sxx, &smooth_gsxx); CHKERRQ(ierr);
@@ -911,26 +1242,8 @@ PetscErrorCode Compute_sxx_magP(JacRes *jr, PetscInt nD)
 	ierr = DMDAVecGetArray(jr->DA_CELL_2D, dike->solidus, &solidus); CHKERRQ(ierr);
 	ierr = DMDAVecGetArray(jr->DA_CELL_2D, dike->magPresence, &magPresence); CHKERRQ(ierr); // *djking
 
-	// store solidus in dike structure and find solidus max *djking
-	START_PLANE_LOOP
-	solidus[L][j][i] = zsol[L][j][i]; // store zsol in the solidus array outside function
-	zsol_max_local = PetscMax(zsol[L][j][i], zsol_max_local); // finding local max solidus (thinnest lithosphere)
-	END_PLANE_LOOP
-	MPI_Allreduce(&zsol_max_local, &zsol_max_global, 1, MPIU_SCALAR, MPI_MAX, PETSC_COMM_WORLD); // find solidus global max
-
-/* 	// to find 2 peaks if we switch to using focused_magPressure *djking testing
-	PetscScalar zsol_max_local[2] = {-PETSC_MAX_REAL, -PETSC_MAX_REAL}; // Array to store local top two maxima
-    PetscScalar zsol_max_global[2];
-	    START_PLANE_LOOP
-        solidus[L][j][i] = zsol[L][j][i];
-        if (zsol[L][j][i] > zsol_max_local[0]) {
-            zsol_max_local[1] = zsol_max_local[0];
-            zsol_max_local[0] = zsol[L][j][i];
-        } else if (zsol[L][j][i] > zsol_max_local[1]) {
-            zsol_max_local[1] = zsol[L][j][i];
-        }
-    END_PLANE_LOOP
-	MPI_Allreduce(&zsol_max_local, &zsol_max_global, 2, MPIU_SCALAR, MPI_MAX, PETSC_COMM_WORLD); */
+	ierr = DMDAVecGetArray(surf->DA_SURF, surf->gtopo, &surface); CHKERRQ(ierr);
+	ierr = DMDAVecGetArray(jr->DA_CELL_2D, dike->phratlithavg, &phratlithavgArray); CHKERRQ(ierr); // *djking
 
 	// calculate depth average stress (sxx) and excess magma pressure
 	START_PLANE_LOOP
@@ -955,55 +1268,112 @@ PetscErrorCode Compute_sxx_magP(JacRes *jr, PetscInt nD)
 		
 	END_PLANE_LOOP
 
-  // restore buffer and mean stress vectors
-  ierr = DMDAVecRestoreArray(fs->DA_CEN, jr->lT,   &lT);  CHKERRQ(ierr);
 
-  ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, dike->magPressure, &magPressure); CHKERRQ(ierr);
-  ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, dike->focused_magPressure, &focused_magPressure); CHKERRQ(ierr); // *djking
+	// store solidus in dike structure and find solidus max for dike base tracking
+	START_PLANE_LOOP
+	solidus[L][j][i] = zsol[L][j][i]; // store zsol in the solidus array outside function
+	zsol_max_local = PetscMax(zsol[L][j][i], zsol_max_local); // finding local max solidus (thinnest lithosphere)
+	END_PLANE_LOOP
+	MPI_Allreduce(&zsol_max_local, &zsol_max_global, 1, MPIU_SCALAR, MPI_MAX, PETSC_COMM_WORLD); // find solidus global max
 
-  ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, dike->sxx_eff_ave, &gsxx_eff_ave); CHKERRQ(ierr);
-  ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, dike->raw_sxx, &raw_gsxx); CHKERRQ(ierr);
-  ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, dike->raw_sxx_ave, &raw_gsxx_ave); CHKERRQ(ierr);
-  ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, dike->smooth_sxx, &smooth_gsxx); CHKERRQ(ierr);
-  ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, dike->smooth_sxx_ave, &smooth_gsxx_ave); CHKERRQ(ierr); 
-
-  ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, dike->solidus, &solidus); CHKERRQ(ierr);
-  ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, dike->magPresence, &magPresence); CHKERRQ(ierr); // *djking
-
-  ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, vsxx, &sxx); CHKERRQ(ierr);
-  ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, vPmag, &Pmag); CHKERRQ(ierr);
-
-  ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, vliththick, &liththick); CHKERRQ(ierr);
-  ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, vzsol, &zsol); CHKERRQ(ierr);
-
-  ierr = VecRestoreArray(vsxx, &lsxx); CHKERRQ(ierr);
-  ierr = VecRestoreArray(vPmag, &lPmag); CHKERRQ(ierr);
-
-  ierr = VecRestoreArray(vliththick, &lliththick); CHKERRQ(ierr);
-  ierr = VecRestoreArray(vzsol, &lzsol); CHKERRQ(ierr);
-
-  ierr = DMRestoreGlobalVector(jr->DA_CELL_2D, &vsxx); CHKERRQ(ierr);
-  ierr = DMRestoreGlobalVector(jr->DA_CELL_2D, &vPmag); CHKERRQ(ierr);  
-  ierr = DMRestoreGlobalVector(jr->DA_CELL_2D, &vliththick); CHKERRQ(ierr);
-  ierr = DMRestoreGlobalVector(jr->DA_CELL_2D, &vzsol); CHKERRQ(ierr);
+	/* 	// to find 2 peaks if we switch to using focused_magPressure *djking testing
+		PetscScalar zsol_max_local[2] = {-PETSC_MAX_REAL, -PETSC_MAX_REAL}; // Array to store local top two maxima
+		PetscScalar zsol_max_global[2];
+		START_PLANE_LOOP
+			solidus[L][j][i] = zsol[L][j][i];
+			if (zsol[L][j][i] > zsol_max_local[0]) {
+				zsol_max_local[1] = zsol_max_local[0];
+				zsol_max_local[0] = zsol[L][j][i];
+			} else if (zsol[L][j][i] > zsol_max_local[1]) {
+				zsol_max_local[1] = zsol[L][j][i];
+			}
+		END_PLANE_LOOP
+		MPI_Allreduce(&zsol_max_local, &zsol_max_global, 2, MPIU_SCALAR, MPI_MAX, PETSC_COMM_WORLD); */
 
 
-  //fill ghost points
+	// collect lithospheric phase ratios for VarM *djking
+	START_PLANE_LOOP
+		phratlith = 0.0;
 
-  LOCAL_TO_LOCAL(jr->DA_CELL_2D, dike->magPressure);
-  LOCAL_TO_LOCAL(jr->DA_CELL_2D, dike->focused_magPressure); // *djking
-      
-  LOCAL_TO_LOCAL(jr->DA_CELL_2D, dike->sxx_eff_ave);
-  LOCAL_TO_LOCAL(jr->DA_CELL_2D, dike->raw_sxx);
-  LOCAL_TO_LOCAL(jr->DA_CELL_2D, dike->raw_sxx_ave);
-  LOCAL_TO_LOCAL(jr->DA_CELL_2D, dike->smooth_sxx);
-  LOCAL_TO_LOCAL(jr->DA_CELL_2D, dike->smooth_sxx_ave);
+		for (k = sz; k < sz + nz; ++k)
+		{
+			GET_CELL_ID(ID, i - sx, j - sy, k - sz, nx, ny); // GET_CELL_ID needs local indices
+			svCell = &jr->svCell[ID];
 
-  LOCAL_TO_LOCAL(jr->DA_CELL_2D, dike->solidus);
-  LOCAL_TO_LOCAL(jr->DA_CELL_2D, dike->magPresence); // *djking
+			if ((surface[L][j][i] - dsz->ccoor[k - sz]) <= (surface[L][j][i] - solidus[L][j][i])) // within lithosphere
+			{
+				dz = SIZE_CELL(k, sz, (*dsz));
+				phratlith += svCell->phRat[dike->PhaseID] * dz; // sum phase ratios for lithosphere
+			}
+		}
+		// store local sum of phratlith
+		phratlithavgArray[L][j][i] = phratlith;
+	END_PLANE_LOOP
 
-  ierr = DMDAVecRestoreArray(fs->DA_CEN, jr->lp_lith, &p_lith); CHKERRQ(ierr);
-  PetscFunctionReturn(0);
+	// sum phratlith across all z-processors for each (j, i) and find average
+	START_PLANE_LOOP
+		PetscScalar localPhratlith = phratlithavgArray[L][j][i];
+		PetscScalar globalPhratlith = 0.0;
+
+		MPI_Allreduce(&localPhratlith, &globalPhratlith, 1, MPIU_SCALAR, MPI_SUM, PETSC_COMM_WORLD);
+
+		// Compute average by dividing by lithospheric thickness
+		phratlithavgArray[L][j][i] = globalPhratlith / (surface[L][j][i] - solidus[L][j][i]);
+	END_PLANE_LOOP
+
+
+	// restore buffer and mean stress vectors
+	ierr = DMDAVecRestoreArray(fs->DA_CEN, jr->lT,   &lT);  CHKERRQ(ierr);
+
+	ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, dike->magPressure, &magPressure); CHKERRQ(ierr);
+	ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, dike->focused_magPressure, &focused_magPressure); CHKERRQ(ierr); // *djking
+
+	ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, dike->sxx_eff_ave, &gsxx_eff_ave); CHKERRQ(ierr);
+	ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, dike->raw_sxx, &raw_gsxx); CHKERRQ(ierr);
+	ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, dike->raw_sxx_ave, &raw_gsxx_ave); CHKERRQ(ierr);
+	ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, dike->smooth_sxx, &smooth_gsxx); CHKERRQ(ierr);
+	ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, dike->smooth_sxx_ave, &smooth_gsxx_ave); CHKERRQ(ierr); 
+
+	ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, dike->solidus, &solidus); CHKERRQ(ierr);
+	ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, dike->magPresence, &magPresence); CHKERRQ(ierr); // *djking
+
+	ierr = DMDAVecRestoreArray(surf->DA_SURF, surf->gtopo, &surface); CHKERRQ(ierr);
+	ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, dike->phratlithavg, &phratlithavgArray); CHKERRQ(ierr); // *djking
+
+	ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, vsxx, &sxx); CHKERRQ(ierr);
+	ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, vPmag, &Pmag); CHKERRQ(ierr);
+
+	ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, vliththick, &liththick); CHKERRQ(ierr);
+	ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, vzsol, &zsol); CHKERRQ(ierr);
+
+	ierr = VecRestoreArray(vsxx, &lsxx); CHKERRQ(ierr);
+	ierr = VecRestoreArray(vPmag, &lPmag); CHKERRQ(ierr);
+
+	ierr = VecRestoreArray(vliththick, &lliththick); CHKERRQ(ierr);
+	ierr = VecRestoreArray(vzsol, &lzsol); CHKERRQ(ierr);
+
+	ierr = DMRestoreGlobalVector(jr->DA_CELL_2D, &vsxx); CHKERRQ(ierr);
+	ierr = DMRestoreGlobalVector(jr->DA_CELL_2D, &vPmag); CHKERRQ(ierr);  
+	ierr = DMRestoreGlobalVector(jr->DA_CELL_2D, &vliththick); CHKERRQ(ierr);
+	ierr = DMRestoreGlobalVector(jr->DA_CELL_2D, &vzsol); CHKERRQ(ierr);
+
+
+	//fill ghost points
+
+	LOCAL_TO_LOCAL(jr->DA_CELL_2D, dike->magPressure);
+	LOCAL_TO_LOCAL(jr->DA_CELL_2D, dike->focused_magPressure); // *djking
+		
+	LOCAL_TO_LOCAL(jr->DA_CELL_2D, dike->sxx_eff_ave);
+	LOCAL_TO_LOCAL(jr->DA_CELL_2D, dike->raw_sxx);
+	LOCAL_TO_LOCAL(jr->DA_CELL_2D, dike->raw_sxx_ave);
+	LOCAL_TO_LOCAL(jr->DA_CELL_2D, dike->smooth_sxx);
+	LOCAL_TO_LOCAL(jr->DA_CELL_2D, dike->smooth_sxx_ave);
+
+	LOCAL_TO_LOCAL(jr->DA_CELL_2D, dike->solidus);
+	LOCAL_TO_LOCAL(jr->DA_CELL_2D, dike->magPresence); // *djking
+
+	ierr = DMDAVecRestoreArray(fs->DA_CEN, jr->lp_lith, &p_lith); CHKERRQ(ierr);
+	PetscFunctionReturn(0);
 }
 
 //------------------------------------------------------------------------------------------------------------------
@@ -1019,10 +1389,11 @@ PetscErrorCode Smooth_sxx_eff(JacRes *jr, PetscInt nD, PetscInt nPtr, PetscInt  
 	FreeSurf    *surf;
 	Ph_trans_t  *CurrPhTr;
 
-	PetscScalar ***surface, ***solidus, lithick; // *djking
-	PetscScalar ***magPressure, ***focused_magPressure, ***magPresence; // *djking
+	PetscScalar ***surface, ***solidus, lithick;
+	PetscScalar ***magPressure, ***focused_magPressure, ***magPresence; 
 	PetscScalar ***gsxx_eff_ave, ***gsxx_eff_ave_hist;
-	PetscScalar ***raw_gsxx, ***smooth_gsxx;
+	PetscScalar ***raw_gsxx, ***smooth_gsxx; 
+	PetscScalar dikingPressure, ***PDArray; // *djking
 	PetscScalar ***raw_gsxx_ave, ***raw_gsxx_ave_hist;
 	PetscScalar ***smooth_gsxx_ave, ***smooth_gsxx_ave_hist;
 	PetscScalar ***ycoors, *lycoors, ***ycoors_prev, *lycoors_prev, ***ycoors_next, *lycoors_next;
@@ -1168,6 +1539,7 @@ PetscErrorCode Smooth_sxx_eff(JacRes *jr, PetscInt nD, PetscInt nPtr, PetscInt  
 	ierr = DMDAVecGetArray(jr->DA_CELL_2D, dike->focused_magPressure, &focused_magPressure); CHKERRQ(ierr);
 	ierr = DMDAVecGetArray(jr->DA_CELL_2D, dike->solidus, &solidus); CHKERRQ(ierr);
 	ierr = DMDAVecGetArray(jr->DA_CELL_2D, dike->magPresence, &magPresence); CHKERRQ(ierr);	
+	ierr = DMDAVecGetArray(jr->DA_CELL_2D, dike->PD, &PDArray); CHKERRQ(ierr);
 	ierr = DMDAVecGetArray(surf->DA_SURF, surf->gtopo, &surface); CHKERRQ(ierr);
 	
 	START_PLANE_LOOP
@@ -1614,47 +1986,16 @@ PetscErrorCode Smooth_sxx_eff(JacRes *jr, PetscInt nD, PetscInt nPtr, PetscInt  
 		ierr = DMDAVecRestoreArray(jr->DA_CELL_2D_tave, dike->smooth_sxx_ave_hist, &smooth_gsxx_ave_hist); CHKERRQ(ierr);
 	}// end if nstep_ave>1
 
-  // output smoothed stress array to .txt file on timesteps of other output
-  if (((istep % nstep_out) == 0 || istep == 1) && (dike->out_stress > 0)) 
-  {
-    if (L == 0)
-    {
-      // Form the filename based on jr->ts->istep+1
-      std::ostringstream oss;
-      oss << "sxx_outputs_Timestep_" << std::setfill('0') << std::setw(8) << (jr->ts->istep+1) << ".txt";
-      std::string filename = oss.str();
-
-      // Open a file with the formed filename
-      std::ofstream outFile(filename);
-      if (outFile)
-      {
-        START_PLANE_LOOP
-        xc = COORD_CELL(i, sx, fs->dsx);
-        yc = COORD_CELL(j, sy, fs->dsy);
-		lithick = surface[L][j][i] - solidus[L][j][i];
-
-        // Writing space delimited data
-        outFile
-          << " " << xc << " " << yc 
-          << " " << magPressure[L][j][i] 
-          << " " << focused_magPressure[L][j][i]
-          << " " << raw_gsxx[L][j][i] 
-          << " " << raw_gsxx_ave[L][j][i] 
-          << " " << smooth_gsxx[L][j][i] 
-          << " " << smooth_gsxx_ave[L][j][i] 
-          << " " << gsxx_eff_ave[L][j][i] 
-          << " " << jr->ts->istep+1 << " " << jr->ts->time * jr->scal->time    
-		  << " " << surface[L][j][i] << " " << solidus[L][j][i]    
-		  << " " << lithick << " " << magPresence[L][j][i] << "\n";    
-
-        END_PLANE_LOOP
-      }
-      else
-      {
-        std::cerr << "Error creating file: " << filename << std::endl;
-      }
-    }
-  }  
+	// calculate PD for VarM
+	START_PLANE_LOOP
+		dikingPressure = 0;
+		// Calculate lithospheric PD
+		if (gsxx_eff_ave[L][j][i] > dike->Ts)
+		{
+			dikingPressure = gsxx_eff_ave[L][j][i] - dike->Ts;
+		}
+		PDArray[L][j][i] = dikingPressure; // store diking pressure for i,j
+	END_PLANE_LOOP
 
 	//restore arrays
 	ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, dike->magPressure, &magPressure); CHKERRQ(ierr);
@@ -1666,11 +2007,55 @@ PetscErrorCode Smooth_sxx_eff(JacRes *jr, PetscInt nD, PetscInt nPtr, PetscInt  
 	ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, dike->smooth_sxx_ave, &smooth_gsxx_ave); CHKERRQ(ierr);
 	ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, dike->solidus, &solidus); CHKERRQ(ierr);
 	ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, dike->magPresence, &magPresence); CHKERRQ(ierr); 
+	ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, dike->PD, &PDArray); CHKERRQ(ierr);
 	ierr = DMDAVecRestoreArray(surf->DA_SURF, surf->gtopo, &surface); CHKERRQ(ierr);
 
 	LOCAL_TO_LOCAL(jr->DA_CELL_2D, dike->sxx_eff_ave);
 	LOCAL_TO_LOCAL(jr->DA_CELL_2D, dike->solidus);
 	LOCAL_TO_LOCAL(jr->DA_CELL_2D, dike->magPresence); // *djking
+
+	// output smoothed stress array to .txt file on timesteps of other output
+	if (((istep % nstep_out) == 0 || istep == 1) && (dike->out_stress > 0))
+	{
+		if (L == 0)
+		{
+			// Form the filename based on jr->ts->istep+1
+			std::ostringstream oss;
+			oss << "sxx_outputs_Timestep_" << std::setfill('0') << std::setw(8) << (jr->ts->istep + 1) << ".txt";
+			std::string filename = oss.str();
+
+			// Open a file with the formed filename
+			std::ofstream outFile(filename);
+			if (outFile)
+			{
+				START_PLANE_LOOP
+				xc = COORD_CELL(i, sx, fs->dsx);
+				yc = COORD_CELL(j, sy, fs->dsy);
+				lithick = surface[L][j][i] - solidus[L][j][i];
+
+				// Writing space delimited data
+				outFile
+					<< " " << xc << " " << yc
+					<< " " << magPressure[L][j][i]
+					<< " " << focused_magPressure[L][j][i]
+					<< " " << raw_gsxx[L][j][i]
+					<< " " << raw_gsxx_ave[L][j][i]
+					<< " " << smooth_gsxx[L][j][i]
+					<< " " << smooth_gsxx_ave[L][j][i]
+					<< " " << gsxx_eff_ave[L][j][i]
+					<< " " << jr->ts->istep + 1 << " " << jr->ts->time * jr->scal->time
+					<< " " << surface[L][j][i] << " " << solidus[L][j][i]
+					<< " " << lithick  // << " " << magPresence[L][j][i]
+					<< " " << PDArray[L][j][i] << "\n";
+
+				END_PLANE_LOOP
+			}
+			else
+			{
+				std::cerr << "Error creating file: " << filename << std::endl;
+			}
+		}
+  }  
 
 	PetscFunctionReturn(0);  
 }  
@@ -1915,14 +2300,18 @@ PetscErrorCode Set_dike_zones(JacRes *jr, PetscInt nD, PetscInt nPtr, PetscInt j
 
   PetscFunctionReturn(0);  
 }
+
 //----------------------------------------------------------------------------------------------------
 // Set bottom bounds of NotInAir box based on solidus
 // NOTE: this only tested with cpu_x = 1
 //
 
-PetscErrorCode Set_dike_base(JacRes *jr, PetscInt nD, PetscInt nPtr, PetscInt j1, PetscInt j2)
+PetscErrorCode Set_dike_base(JacRes *jr,
+							 PetscInt nD,
+							 PetscInt nPtr,
+							 PetscInt j1,
+							 PetscInt j2)
 {
-
 	FDSTAG      *fs;
 	Dike        *dike;
 	Discret1D   *dsz;
@@ -2177,7 +2566,7 @@ PetscErrorCode DynamicDike_Destroy(JacRes *jr)
   if (dyndike_on==1)
   {
     ierr = DMDestroy(&jr->DA_CELL_2D_tave); CHKERRQ(ierr);
-    ierr = DMDestroy(&jr->DA_CELL_1D); CHKERRQ(ierr);    
+    ierr = DMDestroy(&jr->DA_CELL_1D); CHKERRQ(ierr);        
   }
 
   PetscFunctionReturn(0);

@@ -61,8 +61,13 @@ public:
   Vec magPressure;
   Vec focused_magPressure; // *djking
 
+  // *djking  
   Vec solidus;
-  Vec magPresence; // *djking
+  Vec magPresence; 
+  Vec PD; // diking pressure
+  Vec cumulativePD; // diking pressure summed across x for every y
+  Vec phratlithavg; // phase ratio for lithosperic diking column
+
 
   PetscScalar drhomagma;
   PetscScalar zmax_magma;
@@ -81,31 +86,44 @@ struct DBPropDike
   Dike     matDike[_max_num_dike_];   // dike properties per dike ID
 };
 
-// create the dike strutures for read-in 
+// create the dike strutures for read-in
 PetscErrorCode DBDikeCreate(DBPropDike *dbdike, DBMat *dbm, FB *fb, JacRes *jr, PetscBool PrintOutput);
 
 // read in dike parameters
 PetscErrorCode DBReadDike(DBPropDike *dbdike, DBMat *dbm, FB *fb, JacRes *jr, PetscBool PrintOutput);
 
 // compute the added RHS of the dike for the continuity equation
-PetscErrorCode GetDikeContr(JacRes *jr,                                                                                                                                
-                            PetscScalar *phRat, // phase ratios in the control volume   
+PetscErrorCode GetDikeContr(JacRes *jr,
+                            PetscScalar *phRat, // phase ratios in the control volume
                             PetscInt &AirPhase,
                             PetscScalar &dikeRHS,
-                            PetscScalar &y_c,
-                            PetscInt J,
-                            PetscScalar sxx_eff_ave_cell);
+                            PetscScalar &y_c, // y center
+                            PetscInt J);      // local y-index
+
+// compute the diking pressure across dike zone (x-direction) for variable M diking
+PetscErrorCode AccumulatedDikingPressure(JacRes *jr,
+                                         Dike *dike,
+                                         PetscInt j1,
+                                         PetscInt j2);
+
+// compute the added RHS of variable M dike for the continuity equation
+PetscErrorCode GetDikeContrVarM(JacRes *jr,
+                                PetscScalar *phRat, // phase ratios in the control volume
+                                PetscInt &AirPhase,
+                                PetscScalar &dikeRHS, // cumulative diking pressure contribution
+                                PetscInt I,           // local x index
+                                PetscInt J);          // local y index
 
 // compute dike heat after Behn & Ito, 2008
 PetscErrorCode Dike_k_heatsource(JacRes *jr,
-                                Material_t *phases,
-                                PetscScalar &Tc,
-                                PetscScalar *phRat, // phase ratios in the control volume
-                                PetscScalar &k,
-                                PetscScalar &rho_A,
-                                PetscScalar &y_c,
-                                PetscInt J,
-                                PetscScalar sxx_eff_ave_cell); 
+                                 Material_t *phases,
+                                 PetscScalar &Tc,
+                                 PetscScalar *phRat, // phase ratios in the control volume
+                                 PetscScalar &k,
+                                 PetscScalar &rho_A,
+                                 PetscScalar &y_c,
+                                 PetscInt J,
+                                 PetscScalar sxx_eff_ave_cell);
 
 PetscErrorCode Compute_sxx_magP(JacRes *jr, PetscInt nD);
 PetscErrorCode Smooth_sxx_eff(JacRes *jr, PetscInt nD, PetscInt nPtr, PetscInt  j1, PetscInt j2);
