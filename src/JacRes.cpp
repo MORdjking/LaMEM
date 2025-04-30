@@ -612,6 +612,11 @@ PetscErrorCode JacResFormResidual(JacRes *jr, Vec x, Vec f)
 	// compute effective strain rate
 	ierr = JacResGetEffStrainRate(jr); CHKERRQ(ierr);
 
+	//recalculate average lithospheric stress for var_M diking *djking
+/* 	ierr = Compute_sxx_magP(jr, nD); CHKERRQ(ierr); // compute mean effective sxx across the lithosphere
+
+	ierr = Smooth_sxx_eff(jr, nD, nPtr, j1, j2); CHKERRQ(ierr); // smooth mean effective sxx */
+
 	// compute residual
 	ierr = JacResGetResidual(jr); CHKERRQ(ierr);
 

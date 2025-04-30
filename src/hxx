@@ -1,0 +1,136 @@
+JacRes.cpp:		svCell->svDev.I2Gdt = getI2Gdt(numPhases, phases, svCell->phRat, dt);
+JacRes.cpp:		svDev  = &svCell->svDev;
+JacRes.cpp:		svBulk = &svCell->svBulk;
+JacRes.cpp:		svCell->dxx = xx;
+JacRes.cpp:		svCell->dyy = yy;
+JacRes.cpp:		svCell->dzz = zz;
+JacRes.cpp:		dxx[k][j][i] = xx + svCell->hxx*svDev->I2Gdt;
+JacRes.cpp:		dyy[k][j][i] = yy + svCell->hyy*svDev->I2Gdt;
+JacRes.cpp:		dzz[k][j][i] = zz + svCell->hzz*svDev->I2Gdt;
+JacRes.cpp:		    ierr = GetDikeContr(jr, svCell->phRat, jr->surf->AirPhase, dikeRHS, y_c, j-sy, sxx_eff_ave_cell);  CHKERRQ(ierr);
+JacRes.cpp:		  	ierr = GetDikeContr(jr, svCell->phRat, jr->surf->AirPhase, dikeRHS, y_c, j-sy, 1.0);  CHKERRQ(ierr);
+JacRes.cpp:		ierr = setUpCtrlVol(&ctx, svCell->phRat, &svCell->svDev, &svCell->svBulk, pc, pc_lith, pc_pore, Tc, DII, z, Le); CHKERRQ(ierr);
+JacRes.cpp:			ierr = setUpCtrlVol(&ctx, svCell->phRat, NULL, &svCell->svBulk, pc, 0.0, 0.0, Tc, 0.0, z, 0.0); CHKERRQ(ierr);
+JacRes.cpp:		svCell->svBulk.pn = p[k][j][i];
+JacRes.cpp:		P->p = svCell->svBulk.pn;
+JacResAux.cpp:		sxx    = svCell->sxx;
+JacResAux.cpp:		syy    = svCell->syy;
+JacResAux.cpp:		dxx    = svCell->dxx;
+JacResAux.cpp:		dyy    = svCell->dyy;
+JacResTemp.cpp:		svDev  = &svCell->svDev;
+JacResTemp.cpp:		svBulk = &svCell->svBulk;
+JacResTemp.cpp:			PetscCall(JacResGetTempParam(jr, svCell->phRat, &kc, &rho_Cp, &rho_A, Tc, y_c, x_c, z_c, j-sy, sxx_eff_ave_cell, surface));
+JacResTemp.cpp:			PetscCall(JacResGetTempParam(jr, svCell->phRat, &kc, &rho_Cp, &rho_A, Tc, y_c, x_c, z_c, j-sy, 1.0, surface));
+JacResTemp.cpp:		svBulk = &svCell->svBulk;
+JacResTemp.cpp:		PetscCall(JacResGetTempParam(jr, svCell->phRat, &kc, &rho_Cp, NULL, Tc, y_c, x_c, z_c, j-sy, 1.0, 1.0));
+adjoint.cpp:					ierr = setUpCtrlVol(&ctx, svCell->phRat, &svCell->svDev, &svCell->svBulk, pc, pc_lith, pc_pore, Tc, DII, z, Le); CHKERRQ(ierr);
+adjoint.cpp:		svBulk = &svCell->svBulk;
+adjoint.cpp:	sxx = 2.0*eta_st*svCell->dxx;
+adjoint.cpp:	syy = 2.0*eta_st*svCell->dyy;
+adjoint.cpp:	szz = 2.0*eta_st*svCell->dzz;
+adjoint.cpp:	svCell->sxx = 2.0*ctx->eta*dxx;
+adjoint.cpp:	svCell->syy = 2.0*ctx->eta*dyy;
+adjoint.cpp:	svCell->szz = 2.0*ctx->eta*dzz;
+adjoint.cpp:	txx = svCell->dxx - svDev->I2Gdt*(svCell->sxx - svCell->hxx);
+adjoint.cpp:	tyy = svCell->dyy - svDev->I2Gdt*(svCell->syy - svCell->hyy);
+adjoint.cpp:	tzz = svCell->dzz - svDev->I2Gdt*(svCell->szz - svCell->hzz);
+adjoint.cpp:		txx*svCell->sxx + tyy*svCell->syy + tzz*svCell->szz +
+adjoint.cpp:		sxx*svCell->dxx + syy*svCell->dyy + szz*svCell->dzz;
+adjoint.cpp:	sxx += svCell->sxx - ptotal;
+adjoint.cpp:	syy += svCell->syy - ptotal;
+adjoint.cpp:	szz += svCell->szz - ptotal;
+adjoint.cpp:	svCell->eta_cr = ctx->eta_cr; // creep viscosity
+adjoint.cpp:	svCell->DIIdif = ctx->DIIdif; // relative diffusion creep strain rate
+adjoint.cpp:	svCell->DIIdis = ctx->DIIdis; // relative dislocation creep strain rate
+adjoint.cpp:	svCell->DIIprl = ctx->DIIprl; // relative Peierls creep strain rate
+adjoint.cpp:	svCell->yield  = ctx->yield;  // average yield stress in control volume
+advect.cpp:			P->S.xx += svCell->sxx - svCell->hxx;
+advect.cpp:			P->S.yy += svCell->syy - svCell->hyy;
+advect.cpp:			P->S.zz += svCell->szz - svCell->hzz;
+advect.cpp:		  	P->APS += dt*sqrt(svCell->svDev.PSR + UPXY + UPXZ + UPYZ);
+advect.cpp:			UPXX = svCell->dxx; UPXX = UPXX*UPXX;
+advect.cpp:			UPYY = svCell->dyy; UPYY = UPYY*UPYY;
+advect.cpp:			UPZZ = svCell->dzz; UPZZ = UPZZ*UPZZ;
+advect.cpp:		P->p += lp[sz+K][sy+J][sx+I]  	- 	svCell->svBulk.pn;
+advect.cpp:		P->T += lT[sz+K][sy+J][sx+I] 	-	svCell->svBulk.Tn;
+advect.cpp:		for(ii = 0; ii < numPhases; ii++) svCell->phRat[ii] = 0.0;
+advect.cpp:		svCell->svBulk.pn  = 0.0;
+advect.cpp:		svCell->svBulk.Tn  = 0.0;
+advect.cpp:		svCell->svDev.APS  = 0.0;
+advect.cpp:		svCell->ATS        = 0.0;
+advect.cpp:		svCell->hxx        = 0.0;
+advect.cpp:		svCell->hyy        = 0.0;
+advect.cpp:		svCell->hzz        = 0.0;
+advect.cpp:		svCell->U[0]       = 0.0;
+advect.cpp:		svCell->U[1]       = 0.0;
+advect.cpp:		svCell->U[2]       = 0.0;
+advect.cpp:		svCell->phRat[P->phase] += w;
+advect.cpp:		svCell->svBulk.pn += w*P->p;
+advect.cpp:		svCell->svBulk.Tn += w*P->T;
+advect.cpp:		svCell->svDev.APS += w*P->APS;
+advect.cpp:		svCell->ATS       += w*P->ATS;
+advect.cpp:		svCell->hxx       += w*P->S.xx;
+advect.cpp:		svCell->hyy       += w*P->S.yy;
+advect.cpp:		svCell->hzz       += w*P->S.zz;
+advect.cpp:		svCell->U[0]      += w*P->U[0];
+advect.cpp:		svCell->U[1]      += w*P->U[1];
+advect.cpp:		svCell->U[2]      += w*P->U[2];
+advect.cpp:		ierr = getPhaseRatio(numPhases, svCell->phRat, &w); CHKERRQ(ierr);
+advect.cpp:		svCell->svBulk.pn /= w;		
+advect.cpp:		svCell->svBulk.Tn /= w;
+advect.cpp:		svCell->svDev.APS /= w;
+advect.cpp:		svCell->ATS       /= w;
+advect.cpp:		svCell->hxx       /= w;
+advect.cpp:		svCell->hyy       /= w;
+advect.cpp:		svCell->hzz       /= w;
+advect.cpp:		svCell->U[0]      /= w;
+advect.cpp:		svCell->U[1]      /= w;
+advect.cpp:		svCell->U[2]      /= w;
+advect.cpp:		svCell->svBulk.pn = lp[k][j][i];
+advect.cpp:		svCell->svBulk.Tn = lT[k][j][i];
+advect.cpp:		svCell->hxx       = svCell->sxx;
+advect.cpp:		svCell->hyy       = svCell->syy;
+advect.cpp:		svCell->hzz       = svCell->szz;
+constEq.cpp:	sxx = 2.0*eta_st*svCell->dxx;
+constEq.cpp:	syy = 2.0*eta_st*svCell->dyy;
+constEq.cpp:	szz = 2.0*eta_st*svCell->dzz;
+constEq.cpp:	svCell->sxx = 2.0*ctx->eta*dxx;
+constEq.cpp:	svCell->syy = 2.0*ctx->eta*dyy;
+constEq.cpp:	svCell->szz = 2.0*ctx->eta*dzz;
+constEq.cpp:	txx = svCell->dxx - svDev->I2Gdt*(svCell->sxx - svCell->hxx);
+constEq.cpp:	tyy = svCell->dyy - svDev->I2Gdt*(svCell->syy - svCell->hyy);
+constEq.cpp:	tzz = svCell->dzz - svDev->I2Gdt*(svCell->szz - svCell->hzz);
+constEq.cpp:		txx*svCell->sxx + tyy*svCell->syy + tzz*svCell->szz +
+constEq.cpp:		sxx*svCell->dxx + syy*svCell->dyy + szz*svCell->dzz;
+constEq.cpp:	sxx += svCell->sxx - ptotal;
+constEq.cpp:	syy += svCell->syy - ptotal;
+constEq.cpp:	szz += svCell->szz - ptotal;
+constEq.cpp:	svCell->eta_cr = ctx->eta_cr; // creep viscosity
+constEq.cpp:	svCell->DIIdif = ctx->DIIdif; // relative diffusion creep strain rate
+constEq.cpp:	svCell->DIIdis = ctx->DIIdis; // relative dislocation creep strain rate
+constEq.cpp:	svCell->DIIprl = ctx->DIIprl; // relative Peierls creep strain rate
+constEq.cpp:	svCell->DIIfk  = ctx->DIIfk;  // relative Frank-Kamenetzky strain rate
+constEq.cpp:	svCell->DIIpl  = ctx->DIIpl;  // relative plastic strain rate
+constEq.cpp:	svCell->yield  = ctx->yield;  // average yield stress in control volume
+cvi.cpp:		P->p += lp[sz+K][sy+J][sx+I] - svCell->svBulk.pn;
+cvi.cpp:		P->T += lT[sz+K][sy+J][sx+I] - svCell->svBulk.Tn;
+dike.cpp:          if ((Tc<=Tsol) && (svCell->phRat[AirPhase] < 1.0))
+dike.cpp:			  sxx[L][j][i]+=(svCell->hxx - svCell->svBulk.pn)*dz;  //integrating dz-weighted total stress
+dike.cpp:			  PetscCall(PetscPrintf(PETSC_COMM_WORLD, "cellID=%d hxx=%.3e, sxx=%.3e, hp=%.3e, intsxx=%.3e\n", ID, svCell->hxx, svCell->sxx, svCell->svBulk.pn, sxx[L][j][i]));
+outFunct.cpp:	#define GET_SXX { svCell = &jr->svCell  [iter++]; buff[k][j][i] = svCell->sxx + pf*svCell->svDev.eta_st*svCell->dxx; }
+outFunct.cpp:	#define GET_SYY { svCell = &jr->svCell  [iter++]; buff[k][j][i] = svCell->syy + pf*svCell->svDev.eta_st*svCell->dyy; }
+outFunct.cpp:	#define GET_SZZ { svCell = &jr->svCell  [iter++]; buff[k][j][i] = svCell->szz + pf*svCell->svDev.eta_st*svCell->dzz; }
+outFunct.cpp:		s = svCell->sxx + pf*svCell->svDev.eta_st*svCell->dxx; J2  = s*s; \
+outFunct.cpp:		s = svCell->syy + pf*svCell->svDev.eta_st*svCell->dyy; J2 += s*s; \
+outFunct.cpp:		s = svCell->szz + pf*svCell->svDev.eta_st*svCell->dzz; J2 += s*s; \
+outFunct.cpp:		d = svCell->dxx; J2  = d*d; \
+outFunct.cpp:		d = svCell->dyy; J2 += d*d; \
+outFunct.cpp:		d = svCell->dzz; J2 += d*d; \
+outFunct.cpp:		Hr = svCell->svDev.Hr; \
+passive_tracer.cpp:			melt_grid[jj] = svCell->svBulk.mf;
+passive_tracer.cpp:			if(svCell->svBulk.mf>0.0)
+phase_transition.cpp:			mf = svCell->svBulk.mf;
+subgrid.cpp:			svCell->phRat[ii] = 0.0;
+subgrid.cpp:		svCell->phRat[P->phase] += 1.0;
+subgrid.cpp:			if(svCell->phRat[ii] > maxMark)
+subgrid.cpp:				maxMark  = svCell->phRat[ii];

@@ -643,7 +643,7 @@ PetscErrorCode Locate_Dike_Zones(AdvCtx *actx)
 	numDike = jr->dbdike->numDike; // number of dikes
 	numPhtr = jr->dbm->numPhtr;
 
-	icounter = 0;
+	//icounter = 0; not needed *djking
 	ierr = DMDAGetCorners(fs->DA_CEN, &sx, &sy, &sz, &nx, &ny, &nz); CHKERRQ(ierr);
 
 	if (ctrl->actDike)
@@ -656,13 +656,13 @@ PetscErrorCode Locate_Dike_Zones(AdvCtx *actx)
 			// if there is any reason to find stress, magmatic pressure, or even the solidus
 			if (dike->dyndike_start > 0 || jr->ctrl.var_M || jr->ctrl.sol_track)
 			{
-				// compute lithostatic pressure
-				if (icounter == 0)
+				// compute lithostatic pressure this has aleady been done at the end of initial guess and solve steps *djking
+/* 				if (icounter == 0)
 				{
 					ierr = JacResGetLithoStaticPressure(jr); CHKERRQ(ierr);
 					ierr = ADVInterpMarkToCell(actx); CHKERRQ(ierr);
 				}
-				icounter++;
+				icounter++; */
 
 				//---------------------------------------------------------------------------------------------
 				//  Find dike phase transition
@@ -829,12 +829,14 @@ PetscErrorCode Compute_sxx_magP(JacRes *jr, PetscInt nD)
  
           if ((Tc<=Tsol) && (svCell->phRat[AirPhase] < 1.0))
           {
-            dz  = SIZE_CELL(k, sz, (*dsz));
-            sxx[L][j][i]+=(svCell->hxx - svCell->svBulk.pn)*dz;  //integrating dz-weighted total stress
+			  dz  = SIZE_CELL(k, sz, (*dsz));
+			  sxx[L][j][i]+=(svCell->hxx - svCell->svBulk.pn)*dz;  //integrating dz-weighted total stress
+			  
+			  Pmag[L][j][i]+=p_lith[k][j][i]*dz; // integrating lithostatic pressure
+			  
+			  liththick[L][j][i]+=dz; //integrating thickness
 
-            Pmag[L][j][i]+=p_lith[k][j][i]*dz; // integrating lithostatic pressure
-
-            liththick[L][j][i]+=dz; //integrating thickness
+			  PetscCall(PetscPrintf(PETSC_COMM_WORLD, "cellID=%d hxx=%.3e, sxx=%.3e, hp=%.3e, intsxx=%.3e\n", ID, svCell->hxx, svCell->sxx, svCell->svBulk.pn, sxx[L][j][i]));
           }
           
           //interpolate depth to the solidus
