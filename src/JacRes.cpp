@@ -24,6 +24,15 @@
 #include "advect.h"
 #include "dike.h"
 #include "heatzone.h"
+
+// added for debug file output *djking
+#include <cstdlib>
+#include <sstream>
+#include <iomanip>
+#include <fstream>
+#include <string>
+#include <iostream>
+
 //---------------------------------------------------------------------------
 PetscErrorCode JacResCreate(JacRes *jr, FB *fb)
 {
@@ -416,10 +425,11 @@ PetscErrorCode JacResCreateData(JacRes *jr)
 	// PSD (adjoint paper)
 	ierr = VecDuplicate(jr->gsol, &jr->phi);               CHKERRQ(ierr);
 	ierr = VecSet(jr->phi, 0.0); CHKERRQ(ierr);
-
+	
 	// continuity residual
 	ierr = DMCreateGlobalVector(fs->DA_CEN, &jr->gc); CHKERRQ(ierr);
 	ierr = DMCreateGlobalVector(fs->DA_CEN, &jr->dc); CHKERRQ(ierr); // dikeRHS contribution
+	ierr = VecSet(jr->dc, 0.0); CHKERRQ(ierr); // zero diking in case dampening needed for var_M
 
 	// corner buffer
 	ierr = DMCreateLocalVector(fs->DA_COR,  &jr->lbcor); CHKERRQ(ierr);
@@ -610,15 +620,22 @@ PetscErrorCode JacResFormResidual(JacRes *jr, Vec x, Vec f)
 	ierr = JacResGetPorePressure(jr); CHKERRQ(ierr);
 
 	// compute effective strain rate
-	ierr = JacResGetEffStrainRate(jr); CHKERRQ(ierr);
+	ierr = JacResGetEffStrainRate(jr); CHKERRQ(ierr); // dxx filled here *djking
 
-	//recalculate average lithospheric stress for var_M diking *djking
-/* 	ierr = Compute_sxx_magP(jr, nD); CHKERRQ(ierr); // compute mean effective sxx across the lithosphere
-
-	ierr = Smooth_sxx_eff(jr, nD, nPtr, j1, j2); CHKERRQ(ierr); // smooth mean effective sxx */
+	//recalculate average lithospheric stress for var_M diking *djking debugging
+	if (jr->ctrl.actDike && jr->ctrl.var_M)
+	{
+		ierr = Compute_varDikingStress(jr, 2);
+	}
 
 	// compute residual
-	ierr = JacResGetResidual(jr); CHKERRQ(ierr);
+	ierr = JacResGetResidual(jr); CHKERRQ(ierr); // dike_RHS computed, subtracted from dxx , sxx then filled
+
+	//recalculate average lithospheric stress for var_M diking *djking debugging
+	if (jr->ctrl.actDike && jr->ctrl.var_M)
+	{
+		ierr = Compute_varDikingStress(jr, 3);
+	}
 
 	// copy residuals to global vector
 	ierr = JacResCopyRes(jr, f); CHKERRQ(ierr);
@@ -1107,14 +1124,19 @@ PetscErrorCode JacResGetResidual(JacRes *jr)
 	PetscInt    I1, I2, J1, J2, K1, K2;
 	PetscInt    i, j, k, nx, ny, nz, sx, sy, sz, mx, my, mz, mcx, mcy, mcz;
 	PetscInt    nD, L;
+	PetscInt	istep, nstep_out, iteration; // *djking
 	PetscScalar ***gsxx_eff_ave, sxx_eff_ave_cell;
+	PetscScalar ***ghxx_ave_smooth, ***ghyy_ave_smooth, ***gsxx_ave_smooth; // *djking
+	PetscScalar ***gsyy_ave_smooth, ***gdxx_ave_smooth, ***gdyy_ave_smooth; // *djking
+	PetscScalar ***ghP_ave_smooth, ***gPc_ave_smooth, ***glithP_ave_smooth; // *djking
+	PetscScalar ***gmagPressure_smooth, stress_max_cell, sr_max_cell; // *djking
+	PetscScalar dikeRHS, x_c, y_c, z_c, bdxx, bdyy, bdzz; // *djking
 	PetscScalar XX, XX1, XX2, XX3, XX4;
 	PetscScalar YY, YY1, YY2, YY3, YY4;
 	PetscScalar ZZ, ZZ1, ZZ2, ZZ3, ZZ4;
 	PetscScalar XY, XY1, XY2, XY3, XY4;
 	PetscScalar XZ, XZ1, XZ2, XZ3, XZ4;
 	PetscScalar YZ, YZ1, YZ2, YZ3, YZ4;
-	PetscScalar dikeRHS, y_c;
 	PetscScalar bdx, fdx, bdy, fdy, bdz, fdz, dx, dy, dz, Le;
 	PetscScalar gx, gy, gz, tx, ty, tz, sxx, syy, szz, sxy, sxz, syz, gres;
 	PetscScalar J2Inv, DII, z, rho, Tc, pc, pc_lith, pc_pore, dt, fssa, *grav;
@@ -1129,9 +1151,12 @@ PetscErrorCode JacResGetResidual(JacRes *jr)
 	fs = jr->fs;
 	bc = jr->bc;
 
-	// establishing z rank for diking
+	// establishing z rank and steps for diking and debug
 	dsz = &fs->dsz;
 	L   =  (PetscInt)dsz->rank;
+	istep=jr->ts->istep+1; // *djking
+  	nstep_out=jr->ts->nstep_out; // *djking
+  	iteration=jr->ts->itNum; // *djking
 
 	// initialize index bounds
 	mcx = fs->dsx.tcels - 1;
@@ -1188,11 +1213,48 @@ PetscErrorCode JacResGetResidual(JacRes *jr)
 	GET_CELL_RANGE(ny, sy, fs->dsy)
 	GET_CELL_RANGE(nz, sz, fs->dsz)
 
+	// variable M diking
+	nD = 0; // sets dike number to 0 for calculation of sxx_eff_ave across entire domain
+	dike = jr->dbdike->matDike + nD;
+	std::string filename;
 	if (jr->ctrl.actDike && jr->ctrl.var_M)
 	{
-		nD = 0; // sets dike number to 0 for calculation of sxx_eff_ave across entire domain
-		dike = jr->dbdike->matDike + nD;
 		PetscCall(DMDAVecGetArray(jr->DA_CELL_2D, dike->sxx_eff_ave, &gsxx_eff_ave));
+		
+		ierr = DMDAVecGetArray(jr->DA_CELL_2D, dike->hxx_ave_smooth, &ghxx_ave_smooth); CHKERRQ(ierr);
+		ierr = DMDAVecGetArray(jr->DA_CELL_2D, dike->hyy_ave_smooth, &ghyy_ave_smooth); CHKERRQ(ierr);
+		ierr = DMDAVecGetArray(jr->DA_CELL_2D, dike->sxx_ave_smooth, &gsxx_ave_smooth); CHKERRQ(ierr);
+		ierr = DMDAVecGetArray(jr->DA_CELL_2D, dike->syy_ave_smooth, &gsyy_ave_smooth); CHKERRQ(ierr);
+		ierr = DMDAVecGetArray(jr->DA_CELL_2D, dike->dxx_ave_smooth, &gdxx_ave_smooth); CHKERRQ(ierr);
+		ierr = DMDAVecGetArray(jr->DA_CELL_2D, dike->dyy_ave_smooth, &gdyy_ave_smooth); CHKERRQ(ierr);
+		ierr = DMDAVecGetArray(jr->DA_CELL_2D, dike->hP_ave_smooth, &ghP_ave_smooth); CHKERRQ(ierr);
+		ierr = DMDAVecGetArray(jr->DA_CELL_2D, dike->Pc_ave_smooth, &gPc_ave_smooth); CHKERRQ(ierr);
+		ierr = DMDAVecGetArray(jr->DA_CELL_2D, dike->lithP_ave_smooth, &glithP_ave_smooth); CHKERRQ(ierr);
+		ierr = DMDAVecGetArray(jr->DA_CELL_2D, dike->magPressure_smooth, &gmagPressure_smooth); CHKERRQ(ierr);
+
+		if ((istep % nstep_out) == 0 || (istep == 1))
+		{
+			// Create folder name; e.g. JacRes_Outs/Timestep_00000042
+			std::ostringstream folder_path_stream;
+			folder_path_stream << "JacRes_Outs/Timestep_" << std::setw(8) << std::setfill('0') << istep;
+			std::string folder_path = folder_path_stream.str();
+
+			// Call shell to create folders
+			std::string mkdir_cmd = "mkdir -p " + folder_path;
+			std::system(mkdir_cmd.c_str());
+
+			// Create full filename; e.g. JacRes_Outs/Timestep_00000042/Iteration_137.txt
+			std::ostringstream file_path_stream;
+			file_path_stream << folder_path << "/Iteration_" << std::setw(3) << std::setfill('0') << iteration << ".txt";
+			filename = file_path_stream.str();
+
+			// Open and clear file
+			std::ofstream clearFile(filename, std::ios::trunc);
+			if (!clearFile)
+			{
+				std::cerr << "Could not create output file: " << filename << std::endl;
+			}
+		}
 	}
 
 	START_STD_LOOP
@@ -1205,20 +1267,33 @@ PetscErrorCode JacResGetResidual(JacRes *jr)
 		//=================
 		if (jr->ctrl.actDike)
 		{
+		  x_c = COORD_CELL(i,sx,fs->dsx);  
 		  y_c = COORD_CELL(j,sy,fs->dsy);
+		  z_c = COORD_CELL(k,sz,fs->dsz);
 		
-		  dikeRHS = 0.0;
+		  dikeRHS = 0;
+		  // hdiv_dike = div_dike[k][j][i]; // *djking if dampening
 
 		  // function that computes dikeRHS (additional divergence due to dike) depending on the phase ratio
 		  if (jr->ctrl.var_M)
 		  {
-		  	sxx_eff_ave_cell = gsxx_eff_ave[L][j][i];
-		    ierr = GetDikeContr(jr, svCell->phRat, jr->surf->AirPhase, dikeRHS, y_c, j-sy, sxx_eff_ave_cell);  CHKERRQ(ierr);
-		  }
+			// need to code hxx on first iteration and sxx after - once final process determined (in smoothing function)  
+			stress_max_cell = ghxx_ave_smooth[L][j][i] - ghP_ave_smooth[L][j][i] + gmagPressure_smooth[L][j][i]; // testing sxx_eff_ave_cell equivalence
+			//stress_max_cell = gsxx_ave_smooth[L][j][i]; // max principal stress (sxx in 2d) *revisit for 3d
+			sr_max_cell = gdxx_ave_smooth[L][j][i]; // max principal strain rate (dxx in 2d) *revisit for 3d
+		  	sxx_eff_ave_cell = gsxx_eff_ave[L][j][i]; // diking stress (sxx'- Pc + magP) *djking
+		  	//sxx_eff_ave_cell = stress_max_cell - gPc_ave_smooth[L][j][i] + gmagPressure_smooth[L][j][i]; // diking stress (sxx'- Pc + magP) *djking
+		    ierr = GetDikeContr(jr, svCell->phRat, jr->surf->AirPhase, dikeRHS, y_c, j-sy, sxx_eff_ave_cell, sr_max_cell);  CHKERRQ(ierr);  
+		  }  
 		  else
 		  {
-		  	ierr = GetDikeContr(jr, svCell->phRat, jr->surf->AirPhase, dikeRHS, y_c, j-sy, 1.0);  CHKERRQ(ierr);
-		  }
+		  	ierr = GetDikeContr(jr, svCell->phRat, jr->surf->AirPhase, dikeRHS, y_c, j-sy, 1.0, 1.0);  CHKERRQ(ierr);
+		  }	
+		  
+		  // strain rate before removing dike contribution
+		  bdxx = dxx[k][j][i];
+		  bdyy = dyy[k][j][i];
+		  bdzz = dzz[k][j][i];
 		  
 		  // remove dike contribution to strain rate from deviatoric strain rate (for xx, yy and zz components) prior to computing momentum equation
 		  dxx[k][j][i] -= (2.0/3.0) * dikeRHS;
@@ -1227,6 +1302,30 @@ PetscErrorCode JacResGetResidual(JacRes *jr)
 		
 		  // save global dike divergence for debug output
 		  div_dike[k][j][i] = dikeRHS;
+
+		  // print info for for debugging *djking
+		  // hxx, hyy, sxx, syy, dxx, dyy, hP, Pc, lithP, cdxx, cdyy, (output from compute...)
+		  // x_c, y_c, z_c, stress_max_cell, sxx_eff_ave_cell, sr_max_cell, div_dike, bdxx, bdyy, bdzz, dxx, dyy, dzz
+		  // Open a file with filename from above
+		  if (jr->ctrl.var_M && ((istep % nstep_out) == 0 || (istep == 1)))
+		  {
+			  std::ofstream outFile(filename, std::ios::app); // append mode
+			  if (outFile)
+			  {
+				  outFile
+					  << x_c << " " << y_c << " " << z_c << " " << iteration
+					  << " " << stress_max_cell
+					  << " " << sxx_eff_ave_cell
+					  << " " << sr_max_cell
+					  << " " << div_dike[k][j][i]
+					  << " " << bdxx << " " << bdyy << " " << bdzz
+					  << " " << dxx[k][j][i] << " " << dyy[k][j][i] << " " << dzz[k][j][i] << "\n";
+			  }
+			  else
+			  {
+				  std::cerr << "Error writing to output file: " << filename << std::endl;
+			  }
+		  }
 		}
 
 		// access strain rates
@@ -1336,6 +1435,22 @@ PetscErrorCode JacResGetResidual(JacRes *jr)
 
 	}
 	END_STD_LOOP
+
+	if (jr->ctrl.actDike && jr->ctrl.var_M)
+	{
+		PetscCall(DMDAVecRestoreArray(jr->DA_CELL_2D, dike->sxx_eff_ave, &gsxx_eff_ave));
+
+		ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, dike->hxx_ave_smooth, &ghxx_ave_smooth); CHKERRQ(ierr);
+		ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, dike->hyy_ave_smooth, &ghyy_ave_smooth); CHKERRQ(ierr);
+		ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, dike->sxx_ave_smooth, &gsxx_ave_smooth); CHKERRQ(ierr);
+		ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, dike->syy_ave_smooth, &gsyy_ave_smooth); CHKERRQ(ierr);
+		ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, dike->dxx_ave_smooth, &gdxx_ave_smooth); CHKERRQ(ierr);
+		ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, dike->dyy_ave_smooth, &gdyy_ave_smooth); CHKERRQ(ierr);
+		ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, dike->hP_ave_smooth, &ghP_ave_smooth); CHKERRQ(ierr);
+		ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, dike->Pc_ave_smooth, &gPc_ave_smooth); CHKERRQ(ierr);
+		ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, dike->lithP_ave_smooth, &glithP_ave_smooth); CHKERRQ(ierr);
+		ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, dike->magPressure_smooth, &gmagPressure_smooth); CHKERRQ(ierr);
+	}
 
 	//-------------------------------
 	// xy edge points
@@ -1684,11 +1799,6 @@ PetscErrorCode JacResGetResidual(JacRes *jr)
 	ierr = DMDAVecRestoreArray(fs->DA_CEN, jr->lp_pore, &p_pore);   CHKERRQ(ierr);
 	ierr = DMDAVecRestoreArray(fs->DA_CEN, bc->bcp,     &bcp);      CHKERRQ(ierr);
 	ierr = DMDAVecRestoreArray(fs->DA_CEN, jr->dc,      &div_dike); CHKERRQ(ierr);
-
-	if (jr->ctrl.actDike && jr->ctrl.var_M)
-	{
-		PetscCall(DMDAVecRestoreArray(jr->DA_CELL_2D, dike->sxx_eff_ave, &gsxx_eff_ave));
-	}
 
 	// assemble global residuals from local contributions
 	LOCAL_TO_GLOBAL(fs->DA_X, jr->lfx, jr->gfx)

@@ -50,20 +50,51 @@ public:
   PetscScalar filty;
   //PetscScalar ymindyn;
   //PetscScalar ymaxdyn;
-  Vec sxx_eff_ave;
-  Vec sxx_eff_ave_hist;
-  Vec raw_sxx;
-  Vec raw_sxx_ave;
-  Vec raw_sxx_ave_hist;
-  Vec smooth_sxx;
-  Vec smooth_sxx_ave;
-  Vec smooth_sxx_ave_hist;
-  Vec magPressure;
-  Vec focused_magPressure; // *djking
 
+  Vec sxx_eff_ave; // *delete after debug
+  Vec sxx_eff_ave_hist; // *delete after debug
+  Vec raw_sxx; // *delete after debug
+  Vec raw_sxx_ave; // *delete after debug
+  Vec raw_sxx_ave_hist; // *delete after debug
+  Vec smooth_sxx; // *delete after debug
+  Vec smooth_sxx_ave; // *delete after debug
+  Vec smooth_sxx_ave_hist; // *delete after debug
+  
+  Vec focused_magPressure;
   Vec solidus;
-  Vec magPresence; // *djking
+  Vec magPresence;
 
+  Vec hxx_ave;
+  Vec hxx_ave_hist;
+  Vec hxx_ave_smooth;
+  Vec hyy_ave;
+  Vec hyy_ave_hist;
+  Vec hyy_ave_smooth;
+  Vec sxx_ave;
+  Vec sxx_ave_hist;
+  Vec sxx_ave_smooth;
+  Vec syy_ave;
+  Vec syy_ave_hist;
+  Vec syy_ave_smooth;
+  Vec dxx_ave;
+  Vec dxx_ave_hist;
+  Vec dxx_ave_smooth;
+  Vec dyy_ave;
+  Vec dyy_ave_hist;
+  Vec dyy_ave_smooth;
+  Vec hP_ave;
+  Vec hP_ave_hist;
+  Vec hP_ave_smooth;
+  Vec Pc_ave;
+  Vec Pc_ave_hist;
+  Vec Pc_ave_smooth;
+  Vec lithP_ave;
+  Vec lithP_ave_hist;
+  Vec lithP_ave_smooth;
+  Vec magPressure;
+  Vec magPressure_hist;
+  Vec magPressure_smooth;
+  
   PetscScalar drhomagma;
   PetscScalar zmax_magma;
   PetscScalar magPfac;
@@ -94,7 +125,8 @@ PetscErrorCode GetDikeContr(JacRes *jr,
                             PetscScalar &dikeRHS,
                             PetscScalar &y_c,
                             PetscInt J,
-                            PetscScalar sxx_eff_ave_cell);
+                            PetscScalar sxx_eff_ave_cell,
+                            PetscScalar sr_max_cell);
 
 // compute dike heat after Behn & Ito, 2008
 PetscErrorCode Dike_k_heatsource(JacRes *jr,
@@ -107,11 +139,12 @@ PetscErrorCode Dike_k_heatsource(JacRes *jr,
                                 PetscInt J,
                                 PetscScalar sxx_eff_ave_cell); 
 
-PetscErrorCode Compute_sxx_magP(JacRes *jr, PetscInt nD);
-PetscErrorCode Smooth_sxx_eff(JacRes *jr, PetscInt nD, PetscInt nPtr, PetscInt  j1, PetscInt j2);
+PetscErrorCode Locate_Dike_Zones(AdvCtx *actx, PetscInt sFlag);
+PetscErrorCode Compute_sxx_magP(JacRes *jr, PetscInt nD, PetscInt sFlag);
+PetscErrorCode Smooth_sxx_eff(JacRes *jr, PetscInt nD, PetscInt nPtr, PetscInt  j1, PetscInt j2, PetscInt sFlag);
 PetscErrorCode Set_dike_zones(JacRes *jr, PetscInt nD, PetscInt nPtr, PetscInt  j1, PetscInt j2);
 PetscErrorCode Set_dike_base(JacRes *jr, PetscInt nD, PetscInt nPtr, PetscInt  j1, PetscInt j2);
-PetscErrorCode Locate_Dike_Zones(AdvCtx *actx);
+PetscErrorCode Compute_varDikingStress(JacRes *jr, PetscInt sFlag);
 PetscErrorCode DynamicDike_ReadRestart(DBPropDike *dbdike, DBMat *dbm, JacRes *jr, TSSol *ts, FILE *fp);
 PetscErrorCode DynamicDike_WriteRestart(JacRes *jr, FILE *fp);
 PetscErrorCode DynamicDike_Destroy(JacRes *jr);

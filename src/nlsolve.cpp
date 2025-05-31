@@ -315,9 +315,14 @@ PetscErrorCode FormResidual(SNES snes, Vec x, Vec f, void *ctx)
 {
 	NLSol  *nl;
 	JacRes *jr;
+//	PetscInt it; // *djking
 
 	PetscErrorCode ierr;
 	PetscFunctionBeginUser;
+
+/* 	// iteration number
+	ierr = SNESGetIterationNumber(snes, &it); CHKERRQ(ierr); // *djking
+	jr->ts->itNum = it; // update iteration number for debugging // *djking */
 
 	// clear unused parameters
 	if(snes) snes = NULL;
@@ -419,6 +424,9 @@ PetscErrorCode FormJacobian(SNES snes, Vec x, Mat Amat, Mat Pmat, void *ctx)
 	{
 		ctrl->pLimPlast = 0;
 	}
+
+	// update iteration number for debugging
+	jr->ts->itNum = it; 
 
 	// count iterations
 	nl->it++;
