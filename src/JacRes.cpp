@@ -631,11 +631,11 @@ PetscErrorCode JacResFormResidual(JacRes *jr, Vec x, Vec f)
 	// compute residual
 	ierr = JacResGetResidual(jr); CHKERRQ(ierr); // dike_RHS computed, subtracted from dxx , sxx then filled
 
-	//recalculate average lithospheric stress for var_M diking *djking debugging
+/* 	//recalculate average lithospheric stress for var_M diking *djking debugging
 	if (jr->ctrl.actDike && jr->ctrl.var_M)
 	{
 		ierr = Compute_varDikingStress(jr, 3);
-	}
+	} */
 
 	// copy residuals to global vector
 	ierr = JacResCopyRes(jr, f); CHKERRQ(ierr);
@@ -1130,7 +1130,7 @@ PetscErrorCode JacResGetResidual(JacRes *jr)
 	PetscScalar ***gsyy_ave_smooth, ***gdxx_ave_smooth, ***gdyy_ave_smooth; // *djking
 	PetscScalar ***ghP_ave_smooth, ***gPc_ave_smooth, ***glithP_ave_smooth; // *djking
 	PetscScalar ***gmagPressure_smooth, stress_max_cell, sr_max_cell; // *djking
-	PetscScalar dikeRHS, x_c, y_c, z_c, bdxx, bdyy, bdzz; // *djking
+	PetscScalar dikeRHS, x_c, y_c, z_c, bdxx, bdyy, bdzz, hdiv_dike; // *djking
 	PetscScalar XX, XX1, XX2, XX3, XX4;
 	PetscScalar YY, YY1, YY2, YY3, YY4;
 	PetscScalar ZZ, ZZ1, ZZ2, ZZ3, ZZ4;
@@ -1182,7 +1182,10 @@ PetscErrorCode JacResGetResidual(JacRes *jr)
 	ierr = VecZeroEntries(jr->lfy); CHKERRQ(ierr);
 	ierr = VecZeroEntries(jr->lfz); CHKERRQ(ierr);
 	ierr = VecZeroEntries(jr->gc);  CHKERRQ(ierr);
+	if (iteration == 0)
+	{
 	ierr = VecZeroEntries(jr->dc);  CHKERRQ(ierr);
+	}
 
 	// access work vectors
 	ierr = DMDAVecGetArray(fs->DA_CEN, jr->gc,      &gc);       CHKERRQ(ierr);
@@ -1272,24 +1275,45 @@ PetscErrorCode JacResGetResidual(JacRes *jr)
 		  z_c = COORD_CELL(k,sz,fs->dsz);
 		
 		  dikeRHS = 0;
-		  // hdiv_dike = div_dike[k][j][i]; // *djking if dampening
 
 		  // function that computes dikeRHS (additional divergence due to dike) depending on the phase ratio
 		  if (jr->ctrl.var_M)
 		  {
-			// need to code hxx on first iteration and sxx after - once final process determined (in smoothing function)  
-			stress_max_cell = ghxx_ave_smooth[L][j][i] - ghP_ave_smooth[L][j][i] + gmagPressure_smooth[L][j][i]; // testing sxx_eff_ave_cell equivalence
-			//stress_max_cell = gsxx_ave_smooth[L][j][i]; // max principal stress (sxx in 2d) *revisit for 3d
-			sr_max_cell = gdxx_ave_smooth[L][j][i]; // max principal strain rate (dxx in 2d) *revisit for 3d
-		  	sxx_eff_ave_cell = gsxx_eff_ave[L][j][i]; // diking stress (sxx'- Pc + magP) *djking
-		  	//sxx_eff_ave_cell = stress_max_cell - gPc_ave_smooth[L][j][i] + gmagPressure_smooth[L][j][i]; // diking stress (sxx'- Pc + magP) *djking
-		    ierr = GetDikeContr(jr, svCell->phRat, jr->surf->AirPhase, dikeRHS, y_c, j-sy, sxx_eff_ave_cell, sr_max_cell);  CHKERRQ(ierr);  
-		  }  
+			  // need to code hxx on first iteration and sxx after - once final process determined (in smoothing function)
+			  stress_max_cell = ghxx_ave_smooth[L][j][i] - ghP_ave_smooth[L][j][i] + gmagPressure_smooth[L][j][i]; // testing sxx_eff_ave_cell equivalence
+			  // stress_max_cell = gsxx_ave_smooth[L][j][i]; // max principal stress (sxx in 2d) *revisit for 3d
+			  sr_max_cell = gdxx_ave_smooth[L][j][i];	// max principal strain rate (dxx in 2d) *revisit for 3d
+			  sxx_eff_ave_cell = gsxx_eff_ave[L][j][i]; // diking stress (sxx'- Pc + magP) *djking
+			  // sxx_eff_ave_cell = stress_max_cell - gPc_ave_smooth[L][j][i] + gmagPressure_smooth[L][j][i]; // diking stress (sxx'- Pc + magP) *djking
+
+			  hdiv_dike = div_dike[k][j][i]; // *djking if dampening
+			  
+			  ierr = GetDikeContr(jr, svCell->phRat, jr->surf->AirPhase, dikeRHS, y_c, j - sy, sxx_eff_ave_cell, sr_max_cell); CHKERRQ(ierr);
+
+			  if (L == 0) // *djking *debugging
+			  {
+				  if (x_c < 0.3 && x_c > 0.0 && y_c == -1.5 && z_c<-3 && z_c>-3.3)
+				  {
+					  PetscCall(PetscPrintf(PETSC_COMM_WORLD, "hdiv_dike=%.2e, calc_dikeRHS=%.4e, delta_dikeRHS=%.4e, ", hdiv_dike, dikeRHS, hdiv_dike - dikeRHS));
+					}
+				}
+				
+				dikeRHS = hdiv_dike + (1 - dike->damp) * (dikeRHS - hdiv_dike); // *djking if damping
+				
+				if (L == 0) // *djking *debugging
+				{
+					if (x_c < 0.3 && x_c > 0.0 && y_c == -1.5 && z_c<-3 && z_c>-3.3)
+					{
+					  PetscCall(PetscPrintf(PETSC_COMM_WORLD, "damp=%.2f, new_dikeRHS=%.4e\n", dike->damp, dikeRHS));
+				  }
+			  }
+		  }
 		  else
 		  {
-		  	ierr = GetDikeContr(jr, svCell->phRat, jr->surf->AirPhase, dikeRHS, y_c, j-sy, 1.0, 1.0);  CHKERRQ(ierr);
-		  }	
-		  
+			  ierr = GetDikeContr(jr, svCell->phRat, jr->surf->AirPhase, dikeRHS, y_c, j - sy, 1.0, 1.0);
+			  CHKERRQ(ierr);
+		  }
+
 		  // strain rate before removing dike contribution
 		  bdxx = dxx[k][j][i];
 		  bdyy = dyy[k][j][i];

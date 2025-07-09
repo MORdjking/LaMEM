@@ -103,6 +103,7 @@ public:
   PetscScalar A;      // Smoothing parameter for variable M calculation
 	PetscScalar Ts;     // Tensile strength of rock for variable M calculation (Pa)
   PetscScalar zeta_0; // Initial bulk viscosity for variable M calculation (Pa*s)
+  PetscScalar damp;   // damping parameter for variable M calculation
   PetscInt const_M;   // Flag to turn off var_M on per-dike basis
 };
       
