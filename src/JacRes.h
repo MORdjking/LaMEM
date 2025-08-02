@@ -232,6 +232,7 @@ struct JacRes
 	// continuity residual
 	Vec gc; // global
 	Vec dc; // dike contribution to residual (source term RHS)
+	Vec hdc; // history dike contribution for var_M dike heating (source term RHS)
 
 	// corner buffer
 	Vec lbcor; // local (ghosted)
@@ -377,7 +378,8 @@ PetscErrorCode JacResGetTempParam(
     PetscScalar x_c,      // center of cell in x-direction
     PetscScalar z_c,      // center of cell in z-direction
     PetscInt J,           // coordinate of cell
-    PetscScalar sxx_eff_ave_cell); // lithospheric effective average sxx
+	PetscScalar hdiv_dike_cell); // lithospheric effective average sxx
+/*     PetscScalar sxx_eff_ave_cell); // lithospheric effective average sxx */
 
 // check whether thermal material parameters are properly defined
 PetscErrorCode JacResCheckTempParam(JacRes *jr);

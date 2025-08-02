@@ -545,7 +545,8 @@ PetscErrorCode Dike_k_heatsource(JacRes *jr,
 								 PetscScalar &rho_A,
 								 PetscScalar &y_c,
 								 PetscInt J,
-								 PetscScalar sxx_eff_ave_cell)
+								 PetscScalar hdiv_dike_cell)
+/* 								 PetscScalar sxx_eff_ave_cell) */
 
 {
 	// parameters to determine dilation term
@@ -555,7 +556,7 @@ PetscErrorCode Dike_k_heatsource(JacRes *jr,
 	PetscInt i, nD, nPtr, numDike, numPhtr, nsegs;
 	PetscScalar v_spread, M, left, right, front, back;
 	PetscScalar y_distance, tempdikeRHS;
-	PetscScalar P_comp, div_max, M_rat, zeta;
+	// PetscScalar P_comp, div_max, M_rat, zeta; version prior to hdiv_dike_cell *djking
 
 	// heating parameters
 	Material_t *mat;
@@ -601,7 +602,11 @@ PetscErrorCode Dike_k_heatsource(JacRes *jr,
 
 						if (jr->ctrl.var_M && !(dike->const_M > 0))
 						{
-							P_comp = sxx_eff_ave_cell - dike->Ts;
+							// dependent on history diking (this may miss some heating if dike zone moves outside of diking blocks)
+							tempdikeRHS = hdiv_dike_cell;
+
+							// changes for each iteration
+/* 							P_comp = sxx_eff_ave_cell - dike->Ts;
 							M_rat = M; // M ratio *revisit
 							div_max = M_rat * 2 * (v_spread / (right - left));
 
@@ -613,7 +618,7 @@ PetscErrorCode Dike_k_heatsource(JacRes *jr,
 							else // diking DOES NOT occur
 							{
 								tempdikeRHS = 0.0;
-							}
+							} */
 						}
 						else // not using var_M
 						{
@@ -718,10 +723,13 @@ PetscErrorCode Locate_Dike_Zones(AdvCtx *actx, PetscInt sFlag)
 	jr = actx->jr;
 	fs = jr->fs;
 	ctrl = &jr->ctrl;
-
+	
 	if (!ctrl->actDike || jr->ts->istep + 1 == 0) PetscFunctionReturn(0); // only execute if diking is activated
 	// if (!ctrl->actDike || !ctrl->sol_track || jr->ts->istep + 1 == 0) PetscFunctionReturn(0); // Solidus tracking outside of diking?? debugging
 
+	// copy prior step diking values and save as a history diking value for dike heating (used with var_M) *djking
+	ierr = VecCopy(jr->dc, jr->hdc); CHKERRQ(ierr);
+	
 	PetscPrintf(PETSC_COMM_WORLD, "\n");
 	numDike = jr->dbdike->numDike; // number of dikes
 	numPhtr = jr->dbm->numPhtr;

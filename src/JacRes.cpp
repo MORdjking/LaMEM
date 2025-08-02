@@ -429,7 +429,9 @@ PetscErrorCode JacResCreateData(JacRes *jr)
 	// continuity residual
 	ierr = DMCreateGlobalVector(fs->DA_CEN, &jr->gc); CHKERRQ(ierr);
 	ierr = DMCreateGlobalVector(fs->DA_CEN, &jr->dc); CHKERRQ(ierr); // dikeRHS contribution
-	ierr = VecSet(jr->dc, 0.0); CHKERRQ(ierr); // zero diking in case dampening needed for var_M
+	ierr = VecSet(jr->dc, 0.0); CHKERRQ(ierr);
+	ierr = DMCreateGlobalVector(fs->DA_CEN, &jr->hdc); CHKERRQ(ierr); // history dikeRHS contribution
+	ierr = VecSet(jr->hdc, 0.0); CHKERRQ(ierr);
 
 	// corner buffer
 	ierr = DMCreateLocalVector(fs->DA_COR,  &jr->lbcor); CHKERRQ(ierr);
@@ -560,6 +562,7 @@ PetscErrorCode JacResDestroy(JacRes *jr)
 
 	ierr = VecDestroy(&jr->gc);      CHKERRQ(ierr);
 	ierr = VecDestroy(&jr->dc);      CHKERRQ(ierr);
+	ierr = VecDestroy(&jr->hdc);      CHKERRQ(ierr);
 
 	ierr = VecDestroy(&jr->phi);     CHKERRQ(ierr);
 
@@ -1131,6 +1134,7 @@ PetscErrorCode JacResGetResidual(JacRes *jr)
 	PetscScalar ***ghP_ave_smooth, ***gPc_ave_smooth, ***glithP_ave_smooth; // *djking
 	PetscScalar ***gmagPressure_smooth, stress_max_cell, sr_max_cell; // *djking
 	PetscScalar dikeRHS, x_c, y_c, z_c, bdxx, bdyy, bdzz, hdiv_dike; // *djking
+	PetscScalar hdiv_dike_cell, ***hdiv_dike_test; // *djking
 	PetscScalar XX, XX1, XX2, XX3, XX4;
 	PetscScalar YY, YY1, YY2, YY3, YY4;
 	PetscScalar ZZ, ZZ1, ZZ2, ZZ3, ZZ4;
@@ -1182,6 +1186,7 @@ PetscErrorCode JacResGetResidual(JacRes *jr)
 	ierr = VecZeroEntries(jr->lfy); CHKERRQ(ierr);
 	ierr = VecZeroEntries(jr->lfz); CHKERRQ(ierr);
 	ierr = VecZeroEntries(jr->gc);  CHKERRQ(ierr);
+	// testing if better to start at last step values or at 0 for iterative var_M *djking
 	if (iteration == 0)
 	{
 	ierr = VecZeroEntries(jr->dc);  CHKERRQ(ierr);
@@ -1207,6 +1212,7 @@ PetscErrorCode JacResGetResidual(JacRes *jr)
 	ierr = DMDAVecGetArray(fs->DA_CEN, jr->lp_pore, &p_pore);   CHKERRQ(ierr);
 	ierr = DMDAVecGetArray(fs->DA_CEN, bc->bcp,     &bcp);      CHKERRQ(ierr);
 	ierr = DMDAVecGetArray(fs->DA_CEN, jr->dc,      &div_dike); CHKERRQ(ierr);
+	ierr = DMDAVecGetArray(fs->DA_CEN, jr->hdc,     &hdiv_dike_test); CHKERRQ(ierr);
 
 	//-------------------------------
 	// central points
@@ -1286,7 +1292,8 @@ PetscErrorCode JacResGetResidual(JacRes *jr)
 			  sxx_eff_ave_cell = gsxx_eff_ave[L][j][i]; // diking stress (sxx'- Pc + magP) *djking
 			  // sxx_eff_ave_cell = stress_max_cell - gPc_ave_smooth[L][j][i] + gmagPressure_smooth[L][j][i]; // diking stress (sxx'- Pc + magP) *djking
 
-			  hdiv_dike = div_dike[k][j][i]; // *djking if dampening
+			  hdiv_dike = div_dike[k][j][i]; // use previous iteration div_dike when damping *djking 
+			  hdiv_dike_cell = hdiv_dike_test[k][j][i]; // previous time step div_dike *djking 
 			  
 			  ierr = GetDikeContr(jr, svCell->phRat, jr->surf->AirPhase, dikeRHS, y_c, j - sy, sxx_eff_ave_cell, sr_max_cell); CHKERRQ(ierr);
 
@@ -1294,7 +1301,7 @@ PetscErrorCode JacResGetResidual(JacRes *jr)
 			  {
 				  if (x_c < 0.3 && x_c > 0.0 && y_c == -1.5 && z_c<-3 && z_c>-3.3)
 				  {
-					  PetscCall(PetscPrintf(PETSC_COMM_WORLD, "hdiv_dike=%.2e, calc_dikeRHS=%.4e, delta_dikeRHS=%.4e, ", hdiv_dike, dikeRHS, hdiv_dike - dikeRHS));
+					  PetscCall(PetscPrintf(PETSC_COMM_WORLD, "hdiv_dike=%.2e, hdiv_dike_test=%.2e, calc_dikeRHS=%.4e, delta_dikeRHS=%.4e, ", hdiv_dike, hdiv_dike_cell, dikeRHS, hdiv_dike - dikeRHS));
 					}
 				}
 				
@@ -1823,6 +1830,7 @@ PetscErrorCode JacResGetResidual(JacRes *jr)
 	ierr = DMDAVecRestoreArray(fs->DA_CEN, jr->lp_pore, &p_pore);   CHKERRQ(ierr);
 	ierr = DMDAVecRestoreArray(fs->DA_CEN, bc->bcp,     &bcp);      CHKERRQ(ierr);
 	ierr = DMDAVecRestoreArray(fs->DA_CEN, jr->dc,      &div_dike); CHKERRQ(ierr);
+	ierr = DMDAVecRestoreArray(fs->DA_CEN, jr->hdc,     &hdiv_dike_test); CHKERRQ(ierr);
 
 	// assemble global residuals from local contributions
 	LOCAL_TO_GLOBAL(fs->DA_X, jr->lfx, jr->gfx)

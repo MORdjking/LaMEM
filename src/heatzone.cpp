@@ -229,7 +229,8 @@ PetscErrorCode GetHeatZoneSource(JacRes *jr,
 								 PetscScalar &x_c,
 								 PetscScalar &z_c,
 								 PetscInt J,
-								 PetscScalar sxx_eff_ave_cell)
+								 PetscScalar hdiv_dike_cell)
+/* 								 PetscScalar sxx_eff_ave_cell) */
 
 {
 	HeatZone *heatzone;
@@ -366,7 +367,8 @@ PetscErrorCode GetHeatZoneSource(JacRes *jr,
 			if (jr->ctrl.actDike && jr->ctrl.dikeHeat)
 			{
 				// Subtract heat added via diking
-				PetscCall(SubtractDikeHeatSource(jr, phases, Tc, phRat, hz_contr, y_c, J, sxx_eff_ave_cell));
+				PetscCall(SubtractDikeHeatSource(jr, phases, Tc, phRat, hz_contr, y_c, J, hdiv_dike_cell));
+/* 				PetscCall(SubtractDikeHeatSource(jr, phases, Tc, phRat, hz_contr, y_c, J, sxx_eff_ave_cell)); */
 			}
 
 			rho_A += hz_contr; // add heating to energy equation as source term
@@ -384,7 +386,8 @@ PetscErrorCode SubtractDikeHeatSource(JacRes *jr,
 									  PetscScalar &hz_contr,
 									  PetscScalar &y_c,
 									  PetscInt J,
-									  PetscScalar sxx_eff_ave_cell)
+									  PetscScalar hdiv_dike_cell)
+/* 									  PetscScalar sxx_eff_ave_cell) */
 
 {
 	// parameters to determine dilation term
@@ -440,7 +443,8 @@ PetscErrorCode SubtractDikeHeatSource(JacRes *jr,
 
 						if (jr->ctrl.var_M)
 						{
-							P_comp = sxx_eff_ave_cell - dike->Ts;
+							P_comp = hdiv_dike_cell - dike->Ts;
+/* 							P_comp = sxx_eff_ave_cell - dike->Ts; */
 							M_rat = M; // M ratio *revisit
 							div_max = M_rat * 2 * (v_spread / (right - left));
 
