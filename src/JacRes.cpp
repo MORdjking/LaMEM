@@ -1187,10 +1187,10 @@ PetscErrorCode JacResGetResidual(JacRes *jr)
 	ierr = VecZeroEntries(jr->lfz); CHKERRQ(ierr);
 	ierr = VecZeroEntries(jr->gc);  CHKERRQ(ierr);
 	// testing if better to start at last step values or at 0 for iterative var_M *djking
-	if (iteration == 0)
+/* 	if (iteration == 0)
 	{
 	ierr = VecZeroEntries(jr->dc);  CHKERRQ(ierr);
-	}
+	} */
 
 	// access work vectors
 	ierr = DMDAVecGetArray(fs->DA_CEN, jr->gc,      &gc);       CHKERRQ(ierr);
@@ -1285,17 +1285,26 @@ PetscErrorCode JacResGetResidual(JacRes *jr)
 		  // function that computes dikeRHS (additional divergence due to dike) depending on the phase ratio
 		  if (jr->ctrl.var_M)
 		  {
-			  // need to code hxx on first iteration and sxx after - once final process determined (in smoothing function)
-			  stress_max_cell = ghxx_ave_smooth[L][j][i] - ghP_ave_smooth[L][j][i] + gmagPressure_smooth[L][j][i]; // testing sxx_eff_ave_cell equivalence
-			  // stress_max_cell = gsxx_ave_smooth[L][j][i]; // max principal stress (sxx in 2d) *revisit for 3d
-			  sr_max_cell = gdxx_ave_smooth[L][j][i];	// max principal strain rate (dxx in 2d) *revisit for 3d
-			  sxx_eff_ave_cell = gsxx_eff_ave[L][j][i]; // diking stress (sxx'- Pc + magP) *djking
-			  // sxx_eff_ave_cell = stress_max_cell - gPc_ave_smooth[L][j][i] + gmagPressure_smooth[L][j][i]; // diking stress (sxx'- Pc + magP) *djking
-
+			if(dike->dike3D > 0) // 3d diking turned on
+			{
+			SETERRQ(PETSC_COMM_WORLD, PETSC_ERR_USER, "3D diking does not yet exist");
+			}
+			else // 2D diking (xx direction)
+			{
+				// need to code hxx on first iteration and sxx after - once final process determined (in smoothing function)
+				  stress_max_cell = ghxx_ave_smooth[L][j][i] - ghP_ave_smooth[L][j][i] + gmagPressure_smooth[L][j][i]; // testing sxx_eff_ave_cell equivalence
+				  // stress_max_cell = gsxx_ave_smooth[L][j][i]; // max principal stress (sxx in 2d) *revisit for 3d
+				  sr_max_cell = gdxx_ave_smooth[L][j][i];	// max principal strain rate (dxx in 2d) *revisit for 3d
+				  
+				 
+				  sxx_eff_ave_cell = gsxx_eff_ave[L][j][i]; // diking stress (sxx'- Pc + magP) *djking
+				  // sxx_eff_ave_cell = stress_max_cell - gPc_ave_smooth[L][j][i] + gmagPressure_smooth[L][j][i]; // diking stress (sxx'- Pc + magP) *djking
+			}
+			
 			  hdiv_dike = div_dike[k][j][i]; // use previous iteration div_dike when damping *djking 
 			  hdiv_dike_cell = hdiv_dike_test[k][j][i]; // previous time step div_dike *djking 
 			  
-			  ierr = GetDikeContr(jr, svCell->phRat, jr->surf->AirPhase, dikeRHS, y_c, j - sy, sxx_eff_ave_cell, sr_max_cell); CHKERRQ(ierr);
+			  ierr = GetDikeContr(jr, svCell->phRat, jr->surf->AirPhase, dikeRHS, y_c, j - sy, sxx_eff_ave_cell, sr_max_cell); CHKERRQ(ierr); // change to stress_max_cell once final processes in place *djking
 
 			  if (L == 0) // *djking *debugging
 			  {

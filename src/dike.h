@@ -39,6 +39,7 @@ public:
   PetscInt nstep_locate; // Locate dike every nstep_locate timestep to allow elastic stresses to settle down between relocations
   PetscInt out_stress;  //option to output mean stresses to std out
   PetscInt out_dikeloc;  //option to output dike location to std out
+  PetscInt dike3D;  //option to use 3 dimensional diking (determined by xy plane stresses)
   PetscScalar Mf;        // amount of magma-accomodated extension in front of box 
   PetscScalar Mb;        // amount of magma-accommodated extension in back of box
   PetscScalar Mc;        // amount of magma-accommodated extension in center of box
@@ -99,6 +100,7 @@ public:
   PetscScalar zmax_magma;
   PetscScalar magPfac;
   PetscScalar magPwidth;
+  PetscScalar magPMeltFrac;
 
   PetscScalar A;      // Smoothing parameter for variable M calculation
 	PetscScalar Ts;     // Tensile strength of rock for variable M calculation (Pa)

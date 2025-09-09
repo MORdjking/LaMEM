@@ -350,8 +350,10 @@
     lmaxit          = 25             # maximum number of local rheology iterations 
     lrtol           = 1e-6           # local rheology iterations relative tolerance
     act_dike        = 1              # dike activation flag (additonal term in divergence)
+    var_M           = 1              # activate stress dependent variable diking
     useTk           = 1              # switch to use T-dependent conductivity, 0: not active
-    dikeHeat        = 1		     # switch to use Behn & Ito heat source in the dike
+    useTDk          = 1              # use Temperature AND Depth-dependent conductivity
+    dikeHeat        = 1		         # switch to use Behn & Ito heat source in the dike
     adiabatic_gradient = 1.0         # activate adiabatic gradient in dike region
     Compute_velocity_gradient = 1    # compute the velocity gradient tensor 1: active, 0: not active. If active, it automatically activates the output in the .pvd file
     Phasetrans      = 0              # take phase transitions on particles into account (see  <PhaseTransitionStart>/ <PhaseTransitionEnd> below)
@@ -558,6 +560,8 @@
     out_fluid_density   = 1
     out_conductivity    = 1
     out_vel_gr_tensor   = 1 
+    out_heat_source     = 1
+	out_div_dike        = 1
 # Phase aggregate output paramter
 # Phase ratios of listed phases are summed up and output as a scalar vector
 # Phase aggregate can consist of a single phase
