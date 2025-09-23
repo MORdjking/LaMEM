@@ -1050,6 +1050,24 @@ PetscErrorCode ADVMarkInitGeom(AdvCtx *actx, FB *fb)
 	    ridge->bot 		= ridge->bounds[4];
 	    ridge->top 		= ridge->bounds[5];
 	    ridge->maxAge 	= maxAge;
+		
+		// calculating material in and out area for compensating inflow velbot formula *djking
+		if (actx->jr->ctrl.actDike && actx->jr->ctrl.var_M)
+		{
+			PetscScalar     ridgeSegX, ridgeSegY, ridgeSegZ;
+
+			ridgeSegX  = ridge->bounds[1] - ridge->bounds[0]; // length of ridge segment inx-direction; should be domain width generally
+			ridgeSegY = ridge->bounds[3] - ridge->bounds[2]; // length of ridge segment in y-direction
+			ridgeSegZ = ridge->bounds[5] - ridge->bounds[4]; // z-direction; does not count sticky air or other layers...
+			
+			PetscPrintf(PETSC_COMM_WORLD, "ridgeSegX = %1.2f, ridgeSegY = %1.2f, ridgeSegZ = %1.2f\n", ridgeSegX, ridgeSegY, ridgeSegZ);
+			
+			actx->jr->var_velbot[0] = ridgeSegX;
+			actx->jr->var_velbot[1] = ridgeSegY;
+			actx->jr->var_velbot[2] = ridgeSegZ;
+
+			PetscPrintf(PETSC_COMM_WORLD, "ridgeSegX = %1.2f, ridgeSegY = %1.2f, ridgeSegZ = %1.2f\n", actx->jr->var_velbot[0], actx->jr->var_velbot[1], actx->jr->var_velbot[2]);
+		}
 
 		if (v_spread>0){
 			ridge->v_spread=v_spread;		

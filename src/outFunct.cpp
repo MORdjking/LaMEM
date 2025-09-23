@@ -951,16 +951,5 @@ PetscErrorCode PVOutWriteDikeRHS(OutVec* outvec) // *djking
 	INTERPOLATE_ACCESS(outbuf->lbcen, InterpCenterCorner, 1, 0, 0.0)
 
 	PetscFunctionReturn(0);
-/* 	ACCESS_FUNCTION_HEADER
-
-	cf  = scal->strain_rate;
-
-	ierr = JacResCopyDikeRHS(jr, jr->dc); CHKERRQ(ierr);
-
-	GLOBAL_TO_LOCAL(outbuf->fs->DA_CEN, jr->dc, outbuf->lbcen)
-
-	INTERPOLATE_ACCESS(outbuf->lbcen, InterpCenterCorner, 1, 0, 0.0)
-
-	PetscFunctionReturn(0); */
 }
 //---------------------------------------------------------------------------

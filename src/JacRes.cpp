@@ -72,6 +72,9 @@ PetscErrorCode JacResCreate(JacRes *jr, FB *fb)
 	ctrl->actTemp	   =  0;			// diffusion is not active by default (otherwise we have to define thermal properties in all cases)
 	ctrl->printNorms   =  0;			// print norms of velocity/pressure/temperature?
 	ctrl->Adiabatic_gr = 0.0;
+
+	// more ugliness related to variable velbot and variable M (diking) *djking
+	PetscCall(PetscMemzero(jr->var_velbot, sizeof(jr->var_velbot)));
 	
 	if(scal->utype != _NONE_)
 	{
@@ -1117,6 +1120,7 @@ PetscErrorCode JacResGetResidual(JacRes *jr)
 	// NOTE: we interpolate and average D_ij*D_ij terms instead of D_ij
 
 	FDSTAG     *fs;
+	Scaling    *scal; // *djking
 	BCCtx      *bc;
 	SolVarCell *svCell;
 	SolVarEdge *svEdge;
@@ -1154,6 +1158,7 @@ PetscErrorCode JacResGetResidual(JacRes *jr)
 	// access context
 	fs = jr->fs;
 	bc = jr->bc;
+	scal   = bc->scal; // *djking
 
 	// establishing z rank and steps for diking and debug
 	dsz = &fs->dsz;
@@ -1213,7 +1218,7 @@ PetscErrorCode JacResGetResidual(JacRes *jr)
 	ierr = DMDAVecGetArray(fs->DA_CEN, bc->bcp,     &bcp);      CHKERRQ(ierr);
 	ierr = DMDAVecGetArray(fs->DA_CEN, jr->dc,      &div_dike); CHKERRQ(ierr);
 	ierr = DMDAVecGetArray(fs->DA_CEN, jr->hdc,     &hdiv_dike_test); CHKERRQ(ierr);
-
+	
 	//-------------------------------
 	// central points
 	//-------------------------------
@@ -1223,6 +1228,8 @@ PetscErrorCode JacResGetResidual(JacRes *jr)
 	GET_CELL_RANGE(nz, sz, fs->dsz)
 
 	// variable M diking
+	PetscScalar vol_dike; // for total diking volume used in calculation of variable bottom velocity (var_velbot) *djking
+	vol_dike = 0;
 	nD = 0; // sets dike number to 0 for calculation of sxx_eff_ave across entire domain
 	dike = jr->dbdike->matDike + nD;
 	std::string filename;
@@ -1247,7 +1254,7 @@ PetscErrorCode JacResGetResidual(JacRes *jr)
 			std::ostringstream folder_path_stream;
 			folder_path_stream << "JacRes_Outs/Timestep_" << std::setw(8) << std::setfill('0') << istep;
 			std::string folder_path = folder_path_stream.str();
-
+			
 			// Call shell to create folders
 			std::string mkdir_cmd = "mkdir -p " + folder_path;
 			std::system(mkdir_cmd.c_str());
@@ -1265,65 +1272,80 @@ PetscErrorCode JacResGetResidual(JacRes *jr)
 			}
 		}
 	}
-
+	
 	START_STD_LOOP
 	{
 		// access solution variables
 		svCell = &jr->svCell[iter++];
 
+		// get element size
+		dx = SIZE_CELL(i, sx, fs->dsx);
+		dy = SIZE_CELL(j, sy, fs->dsy);
+		dz = SIZE_CELL(k, sz, fs->dsz);
+		
 		//=================
 		// SECOND INVARIANT
 		//=================
 		if (jr->ctrl.actDike)
 		{
-		  x_c = COORD_CELL(i,sx,fs->dsx);  
-		  y_c = COORD_CELL(j,sy,fs->dsy);
-		  z_c = COORD_CELL(k,sz,fs->dsz);
-		
-		  dikeRHS = 0;
+			x_c = COORD_CELL(i, sx, fs->dsx);
+			y_c = COORD_CELL(j, sy, fs->dsy);
+			z_c = COORD_CELL(k, sz, fs->dsz);
 
-		  // function that computes dikeRHS (additional divergence due to dike) depending on the phase ratio
-		  if (jr->ctrl.var_M)
-		  {
-			if(dike->dike3D > 0) // 3d diking turned on
-			{
-			SETERRQ(PETSC_COMM_WORLD, PETSC_ERR_USER, "3D diking does not yet exist");
-			}
-			else // 2D diking (xx direction)
-			{
-				// need to code hxx on first iteration and sxx after - once final process determined (in smoothing function)
-				  stress_max_cell = ghxx_ave_smooth[L][j][i] - ghP_ave_smooth[L][j][i] + gmagPressure_smooth[L][j][i]; // testing sxx_eff_ave_cell equivalence
-				  // stress_max_cell = gsxx_ave_smooth[L][j][i]; // max principal stress (sxx in 2d) *revisit for 3d
-				  sr_max_cell = gdxx_ave_smooth[L][j][i];	// max principal strain rate (dxx in 2d) *revisit for 3d
-				  
-				 
-				  sxx_eff_ave_cell = gsxx_eff_ave[L][j][i]; // diking stress (sxx'- Pc + magP) *djking
-				  // sxx_eff_ave_cell = stress_max_cell - gPc_ave_smooth[L][j][i] + gmagPressure_smooth[L][j][i]; // diking stress (sxx'- Pc + magP) *djking
-			}
-			
-			  hdiv_dike = div_dike[k][j][i]; // use previous iteration div_dike when damping *djking 
-			  hdiv_dike_cell = hdiv_dike_test[k][j][i]; // previous time step div_dike *djking 
-			  
-			  ierr = GetDikeContr(jr, svCell->phRat, jr->surf->AirPhase, dikeRHS, y_c, j - sy, sxx_eff_ave_cell, sr_max_cell); CHKERRQ(ierr); // change to stress_max_cell once final processes in place *djking
+			dikeRHS = 0;
 
-			  if (L == 0) // *djking *debugging
-			  {
-				  if (x_c < 0.3 && x_c > 0.0 && y_c == -1.5 && z_c<-3 && z_c>-3.3)
-				  {
-					  PetscCall(PetscPrintf(PETSC_COMM_WORLD, "hdiv_dike=%.2e, hdiv_dike_test=%.2e, calc_dikeRHS=%.4e, delta_dikeRHS=%.4e, ", hdiv_dike, hdiv_dike_cell, dikeRHS, hdiv_dike - dikeRHS));
-					}
+			// function that computes dikeRHS (additional divergence due to dike) depending on the phase ratio
+			if (jr->ctrl.var_M)
+			{
+				if (dike->dike3D > 0) // 3d diking turned on
+				{
+					SETERRQ(PETSC_COMM_WORLD, PETSC_ERR_USER, "3D diking does not yet exist");
+				}
+				else // 2D diking (xx direction)
+				{
+					// need to code hxx on first iteration and sxx after - once final process determined (in smoothing function)
+					stress_max_cell = ghxx_ave_smooth[L][j][i] - ghP_ave_smooth[L][j][i] + gmagPressure_smooth[L][j][i]; // testing sxx_eff_ave_cell equivalence
+					// stress_max_cell = gsxx_ave_smooth[L][j][i]; // max principal stress (sxx in 2d) *revisit for 3d
+					sr_max_cell = gdxx_ave_smooth[L][j][i]; // max principal strain rate (dxx in 2d) *revisit for 3d
+
+					sxx_eff_ave_cell = gsxx_eff_ave[L][j][i]; // diking stress (sxx'- Pc + magP) *djking
+															  // sxx_eff_ave_cell = stress_max_cell - gPc_ave_smooth[L][j][i] + gmagPressure_smooth[L][j][i]; // diking stress (sxx'- Pc + magP) *djking
 				}
 				
+				hdiv_dike = div_dike[k][j][i]; // use previous iteration div_dike when damping *djking 
+				hdiv_dike_cell = hdiv_dike_test[k][j][i]; // previous time step div_dike *djking 
+				
+			  	ierr = GetDikeContr(jr, svCell->phRat, jr->surf->AirPhase, dikeRHS, y_c, j - sy, sxx_eff_ave_cell, sr_max_cell); CHKERRQ(ierr); // change to stress_max_cell once final processes in place *djking
+
+				if (L == 0) // *djking *debugging
+				{
+					if (x_c < 0.3 && x_c > 0.0 && y_c == -1.5 && z_c < -3 && z_c > -3.3)
+					{
+						PetscCall(PetscPrintf(PETSC_COMM_WORLD, "hdiv_dike=%.2e, hdiv_dike_test=%.2e, calc_dikeRHS=%.4e, delta_dikeRHS=%.4e, ", hdiv_dike, hdiv_dike_cell, dikeRHS, hdiv_dike - dikeRHS));
+					}
+				}
+
 				dikeRHS = hdiv_dike + (1 - dike->damp) * (dikeRHS - hdiv_dike); // *djking if damping
+	
+				// sum total volumetric flux of dike material to calculate variable diking bottom velocity in *djking
+				PetscScalar yr, cm, dikeRHS_si, vel_dike, km;
+				yr = 3600*24*365.25;
+				cm = 1e2;
+				km = 1e3;
+				dikeRHS_si = dikeRHS*scal->strain_rate;
+				vel_dike = dikeRHS_si*yr*dx*km*cm;
+				vol_dike += (vel_dike/scal->velocity) * (dy/scal->length) * (dz/scal->length); 
+/* 				vol_dike += dikeRHS*dx*dy*dz;  */
 				
 				if (L == 0) // *djking *debugging
 				{
 					if (x_c < 0.3 && x_c > 0.0 && y_c == -1.5 && z_c<-3 && z_c>-3.3)
 					{
 					  PetscCall(PetscPrintf(PETSC_COMM_WORLD, "damp=%.2f, new_dikeRHS=%.4e\n", dike->damp, dikeRHS));
+					  PetscCall(PetscPrintf(PETSC_COMM_WORLD, "dikeRHS_si=%.4e, vel_dike=%.4e, vol_dike=%.4e\n", dikeRHS_si, vel_dike*scal->velocity, vol_dike));
 				  }
 			  }
-		  }
+			}
 		  else
 		  {
 			  ierr = GetDikeContr(jr, svCell->phRat, jr->surf->AirPhase, dikeRHS, y_c, j - sy, 1.0, 1.0);
@@ -1419,9 +1441,6 @@ PetscErrorCode JacResGetResidual(JacRes *jr)
 		z = COORD_CELL(k, sz, fs->dsz);
 
 		// get characteristic element size
-		dx = SIZE_CELL(i, sx, fs->dsx);
-		dy = SIZE_CELL(j, sy, fs->dsy);
-		dz = SIZE_CELL(k, sz, fs->dsz);
 		Le = sqrt(dx*dx + dy*dy + dz*dz);
 
 		// setup control volume parameters
@@ -1475,11 +1494,28 @@ PetscErrorCode JacResGetResidual(JacRes *jr)
 
 	}
 	END_STD_LOOP
-
+	
 	if (jr->ctrl.actDike && jr->ctrl.var_M)
 	{
+		// compute the change in compensating inflow setup for variable diking *djking
+		// bc->velbot = 0.6/scal->velocity; // hardcoded test
+		PetscScalar A_side, A_bottom;
+		
+/* 		A_side = (jr->var_velbot[1]/scal->length) * (jr->var_velbot[2]/scal->length); // area of solid material exiting the sides of the model; y*z
+		A_bottom = (jr->var_velbot[0]/scal->length) * (jr->var_velbot[1]/scal->length); // area in which material enters the bottom of the model; x*y */
+		A_side = jr->var_velbot[1] * jr->var_velbot[2]; // area of solid material exiting the sides of the model; y*z
+		A_bottom = jr->var_velbot[0] * jr->var_velbot[1]; // area in which material enters the bottom of the model; x*y
+		jr->var_velbot[3] = vol_dike;
+		bc->velbot = (2*A_side*fabs(bc->velin) - jr->var_velbot[3]) / (A_bottom);
+
+		// print values for variable velbot debugging *djking
+		PetscCall(PetscPrintf(PETSC_COMM_WORLD, "ridgeX = %.4e, ridgeY = %.4e, ridgeZ = %.4e, vol_dike_raw = %.4e, velbot_raw = %.4e\n", jr->var_velbot[0], jr->var_velbot[1], jr->var_velbot[2], jr->var_velbot[3], bc->velbot));
+
+		
+		// restore arrays used in variable diking
 		PetscCall(DMDAVecRestoreArray(jr->DA_CELL_2D, dike->sxx_eff_ave, &gsxx_eff_ave));
 
+		// not used yet for calculations but should be... *djking
 		ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, dike->hxx_ave_smooth, &ghxx_ave_smooth); CHKERRQ(ierr);
 		ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, dike->hyy_ave_smooth, &ghyy_ave_smooth); CHKERRQ(ierr);
 		ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, dike->sxx_ave_smooth, &gsxx_ave_smooth); CHKERRQ(ierr);

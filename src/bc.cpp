@@ -1696,6 +1696,7 @@ PetscErrorCode BCApplyBezier(BCCtx *bc)
 PetscErrorCode BCApplyBoundVel(BCCtx *bc)
 {
     FDSTAG      *fs;
+    Scaling     *scal;
     PetscInt    mnz, mnx, mny;
     PetscInt    i, j, k, nx, ny, nz, sx, sy, sz, iter;
     PetscScalar ***bcvx,  ***bcvy, ***bcvz;
@@ -1712,6 +1713,7 @@ PetscErrorCode BCApplyBoundVel(BCCtx *bc)
 	
     // access context
     fs     = bc->fs;
+    scal   = bc->scal;
     bot    = bc->bot;
     top    = bc->top;
     velin  = bc->velin;
@@ -1719,6 +1721,9 @@ PetscErrorCode BCApplyBoundVel(BCCtx *bc)
     relax_dist= bc->relax_dist;
     velbot = bc->velbot;
     veltop = bc->veltop;
+
+    // print velbot for variable velbot debugging *djking
+    PetscCall(PetscPrintf(PETSC_COMM_WORLD, "velbot_raw = %.4e, velbot = %.4f cm/yr\n", velbot, velbot*scal->velocity));
 
     // set open boundary flag
     top_open = (PetscScalar) bc->top_open;
