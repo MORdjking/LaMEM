@@ -1285,41 +1285,41 @@ PetscErrorCode JacResGetResidual(JacRes *jr)
 		  // function that computes dikeRHS (additional divergence due to dike) depending on the phase ratio
 		  if (jr->ctrl.var_M)
 		  {
-			if(dike->dike3D > 0) // 3d diking turned on
-			{
-			SETERRQ(PETSC_COMM_WORLD, PETSC_ERR_USER, "3D diking does not yet exist");
-			}
-			else // 2D diking (xx direction)
-			{
-				// need to code hxx on first iteration and sxx after - once final process determined (in smoothing function)
+			  if (dike->dike3D > 0) // 3d diking turned on
+			  {
+				  SETERRQ(PETSC_COMM_WORLD, PETSC_ERR_USER, "3D diking does not yet exist");
+			  }
+			  else // 2D diking (xx direction)
+			  {
+				  // need to code hxx on first iteration and sxx after - once final process determined (in smoothing function)
 				  stress_max_cell = ghxx_ave_smooth[L][j][i] - ghP_ave_smooth[L][j][i] + gmagPressure_smooth[L][j][i]; // testing sxx_eff_ave_cell equivalence
 				  // stress_max_cell = gsxx_ave_smooth[L][j][i]; // max principal stress (sxx in 2d) *revisit for 3d
-				  sr_max_cell = gdxx_ave_smooth[L][j][i];	// max principal strain rate (dxx in 2d) *revisit for 3d
-				  
-				 
+				  sr_max_cell = gdxx_ave_smooth[L][j][i]; // max principal strain rate (dxx in 2d) *revisit for 3d
+
 				  sxx_eff_ave_cell = gsxx_eff_ave[L][j][i]; // diking stress (sxx'- Pc + magP) *djking
-				  // sxx_eff_ave_cell = stress_max_cell - gPc_ave_smooth[L][j][i] + gmagPressure_smooth[L][j][i]; // diking stress (sxx'- Pc + magP) *djking
-			}
-			
-			  hdiv_dike = div_dike[k][j][i]; // use previous iteration div_dike when damping *djking 
-			  hdiv_dike_cell = hdiv_dike_test[k][j][i]; // previous time step div_dike *djking 
-			  
-			  ierr = GetDikeContr(jr, svCell->phRat, jr->surf->AirPhase, dikeRHS, y_c, j - sy, sxx_eff_ave_cell, sr_max_cell); CHKERRQ(ierr); // change to stress_max_cell once final processes in place *djking
+															// sxx_eff_ave_cell = stress_max_cell - gPc_ave_smooth[L][j][i] + gmagPressure_smooth[L][j][i]; // diking stress (sxx'- Pc + magP) *djking
+			  }
+
+			  hdiv_dike = div_dike[k][j][i];			// use previous iteration div_dike when damping *djking
+			  hdiv_dike_cell = hdiv_dike_test[k][j][i]; // previous time step div_dike *djking
+
+			  ierr = GetDikeContr(jr, svCell->phRat, jr->surf->AirPhase, dikeRHS, y_c, j - sy, sxx_eff_ave_cell, sr_max_cell);
+			  CHKERRQ(ierr); // change to stress_max_cell once final processes in place *djking
 
 			  if (L == 0) // *djking *debugging
 			  {
-				  if (x_c < 0.3 && x_c > 0.0 && y_c == -1.5 && z_c<-3 && z_c>-3.3)
+				  if (x_c < 0.3 && x_c > 0.0 && y_c == -1.5 && z_c < -3 && z_c > -3.3)
 				  {
 					  PetscCall(PetscPrintf(PETSC_COMM_WORLD, "hdiv_dike=%.2e, hdiv_dike_test=%.2e, calc_dikeRHS=%.4e, delta_dikeRHS=%.4e, ", hdiv_dike, hdiv_dike_cell, dikeRHS, hdiv_dike - dikeRHS));
-					}
-				}
-				
-				dikeRHS = hdiv_dike + (1 - dike->damp) * (dikeRHS - hdiv_dike); // *djking if damping
-				
-				if (L == 0) // *djking *debugging
-				{
-					if (x_c < 0.3 && x_c > 0.0 && y_c == -1.5 && z_c<-3 && z_c>-3.3)
-					{
+				  }
+			  }
+
+			  dikeRHS = hdiv_dike + (1 - dike->damp) * (dikeRHS - hdiv_dike); // *djking if damping
+
+			  if (L == 0) // *djking *debugging
+			  {
+				  if (x_c < 0.3 && x_c > 0.0 && y_c == -1.5 && z_c < -3 && z_c > -3.3)
+				  {
 					  PetscCall(PetscPrintf(PETSC_COMM_WORLD, "damp=%.2f, new_dikeRHS=%.4e\n", dike->damp, dikeRHS));
 				  }
 			  }

@@ -1030,11 +1030,11 @@ PetscErrorCode Compute_sxx_magP(JacRes *jr, PetscInt nD, PetscInt sFlag)
 		  cdxx[L][j][i] += (svCell->sxx / (2 * svCell->svDev.eta)) * dz; // integrating dz-weighted deviatoric strain rate from stress
 		  cdyy[L][j][i] += (svCell->syy / (2 * svCell->svDev.eta)) * dz; // integrating dz-weighted deviatoric strain rate from stress
 
-		  if (sFlag == 1) // *djking
+		  if (sFlag == 1) // during dike locate step *djking
 		  {
 			  ogsxx[L][j][i] += (svCell->hxx - svCell->svBulk.pn) * dz; // integrating dz-weighted total history stress
 		  }
-		  else
+		  else // within picard iterations
 		  {
 			  if (iteration == 0)
 			  {
@@ -1042,7 +1042,7 @@ PetscErrorCode Compute_sxx_magP(JacRes *jr, PetscInt nD, PetscInt sFlag)
 			  }
 			  else
 			  {
-				  ogsxx[L][j][i] += (svCell->sxx - Pc[L][j][i]) * dz; // integrating dz-weighted total history stress
+				  ogsxx[L][j][i] += (svCell->sxx - lp[k][j][i]) * dz; // integrating dz-weighted total history stress
 			  }
 		  }
 
@@ -1243,6 +1243,7 @@ PetscErrorCode Compute_sxx_magP(JacRes *jr, PetscInt nD, PetscInt sFlag)
 
 	// calculate depth average stresses, strain rate, and pressures
 	START_PLANE_LOOP
+	// first get melt pressure based on T structure at start of time step (during dike locate/phase transition)
 	if (sFlag == 1) // *djking
 	{
 		magP = 0;									 // set magP to zero
@@ -1772,12 +1773,12 @@ PetscErrorCode Smooth_sxx_eff(JacRes *jr, PetscInt nD, PetscInt nPtr, PetscInt  
 		sxx_ave[L][j][i]=gsxx_ave[L][j][i];
 		syy_ave[L][j][i]=gsyy_ave[L][j][i];
 		dxx_ave[L][j][i]=gdxx_ave[L][j][i];
-		dxx_ave[L][j][i]=gdxx_ave[L][j][i];
+		dyy_ave[L][j][i]=gdyy_ave[L][j][i];
 		hP_ave[L][j][i]=ghP_ave[L][j][i];
 		Pc_ave[L][j][i]=gPc_ave[L][j][i];
 		lithP_ave[L][j][i]=glithP_ave[L][j][i];
 
-		if (L == 0) // *djking *debugging
+/* 		if (L == 0) // *djking *debugging
 		{
 			xc = COORD_CELL(i, sx, fs->dsx);
 			yc = COORD_CELL(j, sy, fs->dsy);
@@ -1785,7 +1786,7 @@ PetscErrorCode Smooth_sxx_eff(JacRes *jr, PetscInt nD, PetscInt nPtr, PetscInt  
 			{
 				PetscCall(PetscPrintf(PETSC_COMM_WORLD, "PRESMOOTH: gsxx=%.4e, sxx=%.4e, magP=%.4e\n", sxx[L][j][i] + magP[L][j][i], sxx[L][j][i], magP[L][j][i]));
 			}
-		}
+		} */
 
 	END_PLANE_LOOP
   
@@ -2100,7 +2101,8 @@ PetscErrorCode Smooth_sxx_eff(JacRes *jr, PetscInt nD, PetscInt nPtr, PetscInt  
 		for (i = sx; i < sx+nx; i++)  
 		{
 			sum_sxx=0.0;
-			if (sFlag == 1) // *djking
+
+			if (sFlag == 1) // magP is calculated from start of time step only
 			{
 				sum_magP = 0.0;
 			}
@@ -2151,7 +2153,8 @@ PetscErrorCode Smooth_sxx_eff(JacRes *jr, PetscInt nD, PetscInt nPtr, PetscInt  
 					{
 						w=exp(-0.5*(pow((dxazim/filtx),2) + pow((dyazim/(str_y*filty)),2)))*dx*dy;
 						sum_sxx += sxx_prev[L][jj][ii]*w;
-						if (sFlag == 1) // *djking
+
+						if (sFlag == 1) // magP is calculated from start of time step only
 						{
 							sum_magP += magP_prev[L][jj][ii] * w;
 						}
@@ -2191,7 +2194,8 @@ PetscErrorCode Smooth_sxx_eff(JacRes *jr, PetscInt nD, PetscInt nPtr, PetscInt  
 					{
 						w=exp(-0.5*(pow((dxazim/filtx),2) + pow((dyazim/(str_y*filty)),2)))*dx*dy;
 						sum_sxx += sxx[L][jj][ii]*w;
-						if (sFlag == 1) // *djking
+
+						if (sFlag == 1) // magP is calculated from start of time step only
 						{
 							sum_magP += magP[L][jj][ii] * w;
 						}
@@ -2231,7 +2235,8 @@ PetscErrorCode Smooth_sxx_eff(JacRes *jr, PetscInt nD, PetscInt nPtr, PetscInt  
 					{
 						w=exp(-0.5*(pow((dxazim/filtx),2) + pow((dyazim/(str_y*filty)),2)))*dx*dy;
 						sum_sxx += sxx_next[L][jj][ii]*w;
-						if (sFlag == 1) // *djking
+
+						if (sFlag == 1) // magP is calculated from start of time step only
 						{
 							sum_magP += magP_next[L][jj][ii] * w;
 						}
@@ -2256,10 +2261,12 @@ PetscErrorCode Smooth_sxx_eff(JacRes *jr, PetscInt nD, PetscInt nPtr, PetscInt  
 			focused_magPressure[L][j][i]=(sum_magP/sum_w)*magPfac*exp(-0.5*(pow((cos(azim)*(xcent-xc)/magPwidth),2)));
 			smooth_gsxx[L][j][i]=(sum_sxx/sum_w);
 			smooth_gsxx_ave[L][j][i]=(sum_sxx/sum_w);
-			if (sFlag == 1) // *djking
+
+			if (sFlag == 1) // magP is calculated from start of time step only
 			{
 				gmagPressure[L][j][i] = (sum_magP / sum_w);
 			}
+
 			gsxx_eff_ave[L][j][i]=(sum_sxx/sum_w) + gmagPressure[L][j][i];
 			//gsxx_eff_ave[L][j][i]=(sum_sxx/sum_w) + focused_magPressure[L][j][i]; // *testing
 			
@@ -2273,20 +2280,21 @@ PetscErrorCode Smooth_sxx_eff(JacRes *jr, PetscInt nD, PetscInt nPtr, PetscInt  
 			ghP_ave_smooth[L][j][i]=(sum_ave_hP/sum_w);
 			gPc_ave_smooth[L][j][i]=(sum_ave_Pc/sum_w);
 			glithP_ave_smooth[L][j][i]=(sum_ave_lithP/sum_w);
-			if (sFlag == 1) // *djking
+
+			if (sFlag == 1) // magP is calculated from start of time step only
 			{
 				gmagPressure_smooth[L][j][i] = (sum_magP / sum_w);
 			}
 
-			if (L == 0) // *djking *debugging
+/* 			if (L == 0) // *djking *debugging
 			{
 				xc = COORD_CELL(i, sx, fs->dsx);
 				yc = COORD_CELL(j, sy, fs->dsy);
 				if (xc < 0.3 && xc > 0.0 && yc == -1.5)
 				{
-					PetscCall(PetscPrintf(PETSC_COMM_WORLD, "PRETIMEAVESMOOTH: gsxx=%.4e, sxx=%.4e, magP=%.4e\n", gsxx_eff_ave[L][j][i], ghxx_ave_smooth[L][j][i], gmagPressure_smooth[L][j][i]));
+					PetscCall(PetscPrintf(PETSC_COMM_WORLD, "PRETIMEAVESMOOTH: gsxx=%.4e, sxx=%.4e, magP=%.4e\n", gsxx_eff_ave[L][j][i], gsxx_ave_smooth[L][j][i], gmagPressure_smooth[L][j][i]));
 				}
-			}
+			} */
 
 		}//End loop over i
 	}// End loop over j
@@ -2478,7 +2486,10 @@ PetscErrorCode Smooth_sxx_eff(JacRes *jr, PetscInt nD, PetscInt nPtr, PetscInt  
 				sum_ave_hP = 0.0;
 				sum_ave_Pc = 0.0;
 				sum_ave_lithP = 0.0;
-				sum_magP = 0.0;
+/* 				if (sFlag == 1) // magP is calculated from start of time step only
+				{ */
+					sum_magP = 0.0;
+/* 				} */
 				ghxx_ave_hist[sisc+dike->istep_count][j][i]=ghxx_ave_smooth[L][j][i];  //array for current step
 				ghyy_ave_hist[sisc+dike->istep_count][j][i]=ghyy_ave_smooth[L][j][i];  //array for current step
 				gsxx_ave_hist[sisc+dike->istep_count][j][i]=gsxx_ave_smooth[L][j][i];  //array for current step
@@ -2497,8 +2508,8 @@ PetscErrorCode Smooth_sxx_eff(JacRes *jr, PetscInt nD, PetscInt nPtr, PetscInt  
  					sum_sxx_smooth+=smooth_gsxx_ave_hist[istep_count][j][i];
 					 
 					 // *djking
- 					sum_ave_hxx+=gdxx_ave_hist[istep_count][j][i];
- 					sum_ave_hyy+=gdyy_ave_hist[istep_count][j][i];
+ 					sum_ave_hxx+=ghxx_ave_hist[istep_count][j][i];
+ 					sum_ave_hyy+=ghyy_ave_hist[istep_count][j][i];
  					sum_ave_sxx+=gsxx_ave_hist[istep_count][j][i];
  					sum_ave_syy+=gsyy_ave_hist[istep_count][j][i];
  					sum_ave_dxx+=gdxx_ave_hist[istep_count][j][i];
@@ -2506,7 +2517,8 @@ PetscErrorCode Smooth_sxx_eff(JacRes *jr, PetscInt nD, PetscInt nPtr, PetscInt  
  					sum_ave_hP+=ghP_ave_hist[istep_count][j][i];
  					sum_ave_Pc+=gPc_ave_hist[istep_count][j][i];
  					sum_ave_lithP+=glithP_ave_hist[istep_count][j][i];
-					if (sFlag == 1) // *djking
+
+					if (sFlag == 1) // magP is calculated from start of time step only
 					{
 						sum_magP += gmagPressure_hist[istep_count][j][i];
 					}
@@ -2526,12 +2538,13 @@ PetscErrorCode Smooth_sxx_eff(JacRes *jr, PetscInt nD, PetscInt nPtr, PetscInt  
 				ghP_ave_smooth[L][j][i]=sum_ave_hP/((PetscScalar)istep_nave);
 				gPc_ave_smooth[L][j][i]=sum_ave_Pc/((PetscScalar)istep_nave);
 				glithP_ave_smooth[L][j][i]=sum_ave_lithP/((PetscScalar)istep_nave);
-				if (sFlag == 1) // *djking
+
+				if (sFlag == 1) // magP is calculated from start of time step only
 				{
 					gmagPressure_smooth[L][j][i] = sum_magP / ((PetscScalar)istep_nave);
 				}
 
-				if (L == 0) // *djking *debugging
+/* 				if (L == 0) // *djking *debugging
 				{
 					xc = COORD_CELL(i, sx, fs->dsx);
 					yc = COORD_CELL(j, sy, fs->dsy);
@@ -2539,7 +2552,7 @@ PetscErrorCode Smooth_sxx_eff(JacRes *jr, PetscInt nD, PetscInt nPtr, PetscInt  
 					{
 						PetscCall(PetscPrintf(PETSC_COMM_WORLD, "POSTTIMEAVESMOOTH: gsxx=%.4e, sxx=%.4e?, magP=%.4e?\n", gsxx_eff_ave[L][j][i], ghxx_ave_smooth[L][j][i]+ghP_ave_smooth[L][j][i], gmagPressure_smooth[L][j][i]));
 					}
-				}
+				} */
 			}
 		}
 
