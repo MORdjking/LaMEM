@@ -1120,7 +1120,6 @@ PetscErrorCode JacResGetResidual(JacRes *jr)
 	// NOTE: we interpolate and average D_ij*D_ij terms instead of D_ij
 
 	FDSTAG     *fs;
-	Scaling    *scal; // *djking
 	BCCtx      *bc;
 	SolVarCell *svCell;
 	SolVarEdge *svEdge;
@@ -1158,7 +1157,6 @@ PetscErrorCode JacResGetResidual(JacRes *jr)
 	// access context
 	fs = jr->fs;
 	bc = jr->bc;
-	scal   = bc->scal; // *djking
 
 	// establishing z rank and steps for diking and debug
 	dsz = &fs->dsz;
@@ -1481,11 +1479,8 @@ PetscErrorCode JacResGetResidual(JacRes *jr)
 	if (jr->ctrl.actDike && jr->ctrl.var_M)
 	{
 		// compute the change in compensating inflow setup for variable diking *djking
-		// bc->velbot = 0.6/scal->velocity; // hardcoded test
 		PetscScalar A_side, A_bottom;
-		
-/* 		A_side = (jr->var_velbot[1]/scal->length) * (jr->var_velbot[2]/scal->length); // area of solid material exiting the sides of the model; y*z
-		A_bottom = (jr->var_velbot[0]/scal->length) * (jr->var_velbot[1]/scal->length); // area in which material enters the bottom of the model; x*y */
+	
 		A_side = jr->var_velbot[1] * jr->var_velbot[2]; // area of solid material exiting the sides of the model; y*z
 		A_bottom = jr->var_velbot[0] * jr->var_velbot[1]; // area in which material enters the bottom of the model; x*y
 		jr->var_velbot[3] = vol_dike;
