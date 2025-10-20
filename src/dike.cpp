@@ -280,14 +280,14 @@ PetscErrorCode DBReadDike(DBPropDike *dbdike, DBMat *dbm, FB *fb, JacRes *jr, Pe
 	// variable M parameters
 	if (jr->ctrl.var_M)
 	{
-
+		
 		dike->A = 1e3;		 // default smoothing
 		dike->Ts = 10e6;	 // default tensile strength
 		dike->zeta_0 = 1e22; // default reference bulk viscosity
 		dike->damp = 0;      // default damping value (0 percent)
 		dike->const_M = 0;   // flag to turn off var_M (per-dike basis)
-		dike->dike3D = 0;   // flag to turn on 3D diking (in xy-plane)
-
+		dike->dike3D = 0;    // flag to turn on 3D diking (in xy-plane)
+		
 		PetscCall(getScalarParam(fb, _OPTIONAL_, "A", &dike->A, 1, 1));
 		PetscCall(getScalarParam(fb, _OPTIONAL_, "Ts", &dike->Ts, 1, 1));
 		PetscCall(getScalarParam(fb, _OPTIONAL_, "zeta_0", &dike->zeta_0, 1, 1));
@@ -295,18 +295,19 @@ PetscErrorCode DBReadDike(DBPropDike *dbdike, DBMat *dbm, FB *fb, JacRes *jr, Pe
 		PetscCall(getIntParam(fb, _OPTIONAL_, "const_M", &dike->const_M, 1, 1));
 		PetscCall(getIntParam(fb, _OPTIONAL_, "dike3D", &dike->dike3D, 1, 1));
 		
-
+		
 		// scaling
 		dike->A /= scal->stress_si;
 		dike->Ts /= scal->stress_si;
 		dike->zeta_0 /= scal->viscosity;
 		dike->damp /= 100;
 	}
-
+	
 	// parameters for average lithospheric stress calculations (includes magma pressure)
 	if (dike->dyndike_start > 0 || jr->ctrl.var_M || jr->ctrl.sol_track) 
 	{
-		dike->Tsol = 1000;
+		dike->T_dsol = 1000; // solids temperature (could connect to T_sol in future but would have to bring phase ratios in to do so)
+		dike->T_brit = dike->T_dsol; // brittle-ductile transition temperature defaults to dike solidus if not user defined
 		dike->zmax_magma = -15.0;
 		dike->drhomagma = 500;
 		dike->filtx = 1.5;
@@ -320,11 +321,12 @@ PetscErrorCode DBReadDike(DBPropDike *dbdike, DBMat *dbm, FB *fb, JacRes *jr, Pe
 		dike->magPMeltFrac = 1.0;
 		// dike->ymindyn=-1e+30;
 		// dike->ymaxdyn=1e+30;
-
-		PetscCall(getScalarParam(fb, _OPTIONAL_, "Tsol", &dike->Tsol, 1, 1.0));
+		
+		PetscCall(getScalarParam(fb, _OPTIONAL_, "T_dsol", &dike->T_dsol, 1, 1.0));
+		PetscCall(getScalarParam(fb, _OPTIONAL_, "T_brit", &dike->T_brit, 1, 1.0));
 		PetscCall(getScalarParam(fb, _OPTIONAL_, "filtx", &dike->filtx, 1, 1.0));
 		PetscCall(getScalarParam(fb, _OPTIONAL_, "filty", &dike->filty, 1, 1.0));
-
+		
 		PetscCall(getScalarParam(fb, _OPTIONAL_, "zmax_magma", &dike->zmax_magma, 1, 1.0));
 		PetscCall(getScalarParam(fb, _OPTIONAL_, "drhomagma", &dike->drhomagma, 1, 1.0));
 		PetscCall(getScalarParam(fb, _OPTIONAL_, "magPfac", &dike->magPfac, 1, 1.0));
@@ -332,19 +334,20 @@ PetscErrorCode DBReadDike(DBPropDike *dbdike, DBMat *dbm, FB *fb, JacRes *jr, Pe
 		PetscCall(getScalarParam(fb, _OPTIONAL_, "magPMeltFrac", &dike->magPMeltFrac, 1, 1.0));
 		// PetscCall(getScalarParam(fb, _OPTIONAL_, "ymindyn",	&dike->ymindyn,		1, 1.0));
 		// PetscCall(getScalarParam(fb, _OPTIONAL_, "ymaxdyn",	&dike->ymaxdyn,		1, 1.0));
-
+		
 		PetscCall(getIntParam(fb, _OPTIONAL_, "istep_nave", &dike->istep_nave, 1, 50));
 		PetscCall(getIntParam(fb, _OPTIONAL_, "nstep_locate", &dike->nstep_locate, 1, 1000));
 		PetscCall(getIntParam(fb, _OPTIONAL_, "out_stress", &dike->out_stress, 1, 1));
 		PetscCall(getIntParam(fb, _OPTIONAL_, "out_dikeloc", &dike->out_dikeloc, 1, 1));
-
+		
 		// scaling
-		dike->Tsol = (dike->Tsol + jr->scal->Tshift) / jr->scal->temperature;
 		dike->filtx /= scal->length;
 		dike->filty /= scal->length;
 		dike->zmax_magma /= scal->length;
 		dike->drhomagma /= scal->density;
 		dike->magPwidth /= scal->length;
+		dike->T_dsol = (dike->T_dsol + jr->scal->Tshift) / jr->scal->temperature;
+		dike->T_brit = (dike->T_brit + jr->scal->Tshift) / jr->scal->temperature;
 
 		// initialize so that when istep=dike_start, it is set to 0
 		dike->istep_count = dike->istep_nave;
@@ -373,8 +376,11 @@ PetscErrorCode DBReadDike(DBPropDike *dbdike, DBMat *dbm, FB *fb, JacRes *jr, Pe
 		if (dike->dyndike_start > 0 || jr->ctrl.var_M)
 		{
 			PetscPrintf(PETSC_COMM_WORLD, "   gsxx_eff_ave smoothing parameters:\n");
-			PetscPrintf(PETSC_COMM_WORLD, "     Tsol = %1.0f %s, filtx = %1.2f %s, filty = %1.2f %s\n",
-						dike->Tsol * scal->temperature - scal->Tshift, scal->lbl_temperature, dike->filtx * scal->length, scal->lbl_length, dike->filty * scal->length, scal->lbl_length);
+			PetscPrintf(PETSC_COMM_WORLD, "     T_dsol = %1.0f %s, T_brit = %1.0f %s, filtx = %1.2f %s, filty = %1.2f %s\n",
+						dike->T_dsol * scal->temperature - scal->Tshift, scal->lbl_temperature,
+						dike->T_brit * scal->temperature - scal->Tshift, scal->lbl_temperature, 
+						dike->filtx * scal->length, scal->lbl_length, 
+						dike->filty * scal->length, scal->lbl_length);
 			PetscPrintf(PETSC_COMM_WORLD, "     nstep_locate = %lld, istep_nave = %lld, istep_count = %lld\n",
 						(LLD)(dike->nstep_locate), (LLD)(dike->istep_nave), (LLD)(dike->istep_count));
 			PetscPrintf(PETSC_COMM_WORLD, "   excess magma pressure options:\n");
@@ -550,7 +556,6 @@ PetscErrorCode Dike_k_heatsource(JacRes *jr,
 								 PetscScalar &y_c,
 								 PetscInt J,
 								 PetscScalar hdiv_dike_cell)
-/* 								 PetscScalar sxx_eff_ave_cell) */
 
 {
 	// parameters to determine dilation term
@@ -811,7 +816,8 @@ PetscErrorCode Locate_Dike_Zones(AdvCtx *actx, PetscInt sFlag)
 		}
 	}
 /*  // Solidus tracking outside of diking?? debugging
-	// Currently requires Tsol which is set in the dike block 
+	// Currently requires dike block params b/c calculates more than just solidus
+	
 	else if (jr->ctrl.sol_track) // gets solidus array (as well as average sxx, etc...)
 	{
 		nD = 0;
@@ -847,7 +853,7 @@ PetscErrorCode Compute_sxx_magP(JacRes *jr, PetscInt nD, PetscInt sFlag)
   PetscScalar ***solidus, ***magPresence;
   PetscScalar ***gmagPressure, ***focused_magPressure;
   PetscScalar zsol_max_local = -PETSC_MAX_REAL,  zsol_max_global;
-  PetscScalar dz, ***lT, ***lp, ***p_lith, Tc, *grav, Tsol, magP, magma_presence;
+  PetscScalar dz, ***lT, ***lp, ***p_lith, Tc, *grav, magP, magma_presence;
   PetscInt    i, j, k, sx, sy, sz, nx, ny, nz, L, ID, AirPhase;
   
   Vec         vogsxx; // *delete after debug
@@ -855,6 +861,12 @@ PetscErrorCode Compute_sxx_magP(JacRes *jr, PetscInt nD, PetscInt sFlag)
   PetscScalar ***gsxx_eff_ave; // *delete after debug
   PetscScalar ***raw_gsxx, ***smooth_gsxx; // *delete after debug
   PetscScalar ***raw_gsxx_ave, ***smooth_gsxx_ave; // *delete after debug
+  
+  Vec         vbritthick; // *djking
+  PetscScalar ***britthick; // *djking
+  PetscScalar *lbritthick;
+  PetscScalar T_dsol, T_brit; // *djking
+
 
   PetscMPIInt rank;
 
@@ -907,6 +919,7 @@ PetscErrorCode Compute_sxx_magP(JacRes *jr, PetscInt nD, PetscInt sFlag)
   ierr = DMGetGlobalVector(jr->DA_CELL_2D, &vcdyy); CHKERRQ(ierr);
   ierr = DMGetGlobalVector(jr->DA_CELL_2D, &vzsol); CHKERRQ(ierr);
   ierr = DMGetGlobalVector(jr->DA_CELL_2D, &vogsxx); CHKERRQ(ierr); // *delete after debug
+  ierr = DMGetGlobalVector(jr->DA_CELL_2D, &vbritthick); CHKERRQ(ierr); // *djking
 
   ierr = VecZeroEntries(vhxx); CHKERRQ(ierr);
   ierr = VecZeroEntries(vhyy); CHKERRQ(ierr);
@@ -922,6 +935,7 @@ PetscErrorCode Compute_sxx_magP(JacRes *jr, PetscInt nD, PetscInt sFlag)
   ierr = VecZeroEntries(vcdyy); CHKERRQ(ierr);
   ierr = VecZeroEntries(vzsol); CHKERRQ(ierr);
   ierr = VecZeroEntries(vogsxx); CHKERRQ(ierr); // *delete after debug
+  ierr = VecZeroEntries(vbritthick); CHKERRQ(ierr); // *djking
 
   // open index buffer for computation (sxx the array that shares data with vector vsxx and is indexed with global dimensions<<G.Ito)
   // DMDAVecGetArray(DM da,Vec vec,void *array) Returns a multiple dimension array that shares data with the underlying vector 
@@ -940,6 +954,7 @@ PetscErrorCode Compute_sxx_magP(JacRes *jr, PetscInt nD, PetscInt sFlag)
   ierr = DMDAVecGetArray(jr->DA_CELL_2D, vcdyy, &cdyy); CHKERRQ(ierr);
   ierr = DMDAVecGetArray(jr->DA_CELL_2D, vzsol, &zsol); CHKERRQ(ierr);
   ierr = DMDAVecGetArray(jr->DA_CELL_2D, vogsxx, &ogsxx); CHKERRQ(ierr); // *delete after debug
+  ierr = DMDAVecGetArray(jr->DA_CELL_2D, vbritthick, &britthick); CHKERRQ(ierr); // *djking
 
   // open linear buffer for send/receive  (returns the point, lsxx, that contains this processor portion of vector data, vsxx<<G.Ito)
   //Returns a pointer to a contiguous array that contains this processors portion of the vector data.
@@ -957,6 +972,7 @@ PetscErrorCode Compute_sxx_magP(JacRes *jr, PetscInt nD, PetscInt sFlag)
   ierr = VecGetArray(vcdyy, &lcdyy); CHKERRQ(ierr);
   ierr = VecGetArray(vzsol, &lzsol); CHKERRQ(ierr);
   ierr = VecGetArray(vogsxx, &logsxx); CHKERRQ(ierr); // *delete after debug
+  ierr = VecGetArray(vbritthick, &lbritthick); CHKERRQ(ierr); // *djking
 
 
   // receive from top domain (next)  dsz->grnext is the next proc up (in increasing z). Top to bottom doesn't matter here, its this way
@@ -993,128 +1009,142 @@ PetscErrorCode Compute_sxx_magP(JacRes *jr, PetscInt nD, PetscInt sFlag)
 	 
 	 ierr = MPI_Irecv(lzsol, (PetscMPIInt)(nx*ny), MPIU_SCALAR, dsz->grnext, 0, PETSC_COMM_WORLD, &rrequest); CHKERRQ(ierr);
 	 ierr = MPI_Wait(&rrequest, MPI_STATUSES_IGNORE);  CHKERRQ(ierr);
-
+	 
 	 ierr = MPI_Irecv(logsxx, (PetscMPIInt)(nx*ny), MPIU_SCALAR, dsz->grnext, 0, PETSC_COMM_WORLD, &rrequest); CHKERRQ(ierr); // *delete after debug
      ierr = MPI_Wait(&rrequest, MPI_STATUSES_IGNORE);  CHKERRQ(ierr); // *delete after debug
+
+     ierr = MPI_Irecv(lbritthick, (PetscMPIInt)(nx*ny), MPIU_SCALAR, dsz->grnext, 0, PETSC_COMM_WORLD, &rrequest); CHKERRQ(ierr);
+     ierr = MPI_Wait(&rrequest, MPI_STATUSES_IGNORE);  CHKERRQ(ierr);
   }
-  
+
   ///// INTEGRATE LITHSPHERIC SXX, LITHOSTATIC PRESSURE (lithP), AND THICKNESS OF T-DETERMINED LITHOSPHERE/////
-  Tsol = dike->Tsol;
+  T_brit = dike->T_brit; // brittle/ductile transition temperature
+  T_dsol = dike->T_dsol; // dike solidus isotherm
   for (k = sz + nz - 1; k >= sz; k--)
   {
 	  dz = SIZE_CELL(k, sz, (*dsz));
 	  z_c = COORD_CELL(k, sz, fs->dsz);
+
 	  START_PLANE_LOOP
+
 	  GET_CELL_ID(ID, i - sx, j - sy, k - sz, nx, ny); // GET_CELL_ID needs local indices
 	  svCell = &jr->svCell[ID];
 	  Tc = lT[k][j][i];
 	  x_c = COORD_CELL(i, sx, fs->dsx);
 	  y_c = COORD_CELL(j, sy, fs->dsy);
-
-	  if ((Tc <= Tsol) && (svCell->phRat[AirPhase] < 1.0))
+	  if ((Tc <= T_dsol) && (svCell->phRat[AirPhase] < 1.0))
 	  {
 		  dz = SIZE_CELL(k, sz, (*dsz));
 
-		  hxx[L][j][i] += svCell->hxx * dz; // integrating dz-weighted deviatoric history stress (x-direction)
-		  hyy[L][j][i] += svCell->hyy * dz; // integrating dz-weighted deviatoric history stress (y-direction)
-		  sxx[L][j][i] += svCell->sxx * dz; // integrating dz-weighted deviatoric stress
-		  syy[L][j][i] += svCell->syy * dz; // integrating dz-weighted deviatoric stress
-		  dxx[L][j][i] += svCell->dxx * dz; // integrating dz-weighted deviatoric strain rate
-		  dyy[L][j][i] += svCell->dyy * dz; // integrating dz-weighted deviatoric strain rate
-
+		  // Presure calculated from Solidus
 		  hP[L][j][i] += svCell->svBulk.pn * dz;  // integrating dz-weighted history pressure
 		  Pc[L][j][i] += lp[k][j][i] * dz;		  // integrating dz-weighted pressure
 		  lithP[L][j][i] += p_lith[k][j][i] * dz; // integrating lithostatic pressure
 		  liththick[L][j][i] += dz;				  // integrating thickness
-
-		  cdxx[L][j][i] += (svCell->sxx / (2 * svCell->svDev.eta)) * dz; // integrating dz-weighted deviatoric strain rate from stress
-		  cdyy[L][j][i] += (svCell->syy / (2 * svCell->svDev.eta)) * dz; // integrating dz-weighted deviatoric strain rate from stress
-
-		  if (sFlag == 1) // *djking
+		  
+		  if ((Tc <= T_brit) && (svCell->phRat[AirPhase] < 1.0))
 		  {
-			  ogsxx[L][j][i] += (svCell->hxx - svCell->svBulk.pn) * dz; // integrating dz-weighted total history stress
-		  }
-		  else
-		  {
-			  if (iteration == 0)
+			  hxx[L][j][i] += svCell->hxx * dz; // integrating dz-weighted deviatoric history stress (x-direction)
+			  hyy[L][j][i] += svCell->hyy * dz; // integrating dz-weighted deviatoric history stress (y-direction)
+			  sxx[L][j][i] += svCell->sxx * dz; // integrating dz-weighted deviatoric stress
+			  syy[L][j][i] += svCell->syy * dz; // integrating dz-weighted deviatoric stress
+			  dxx[L][j][i] += svCell->dxx * dz; // integrating dz-weighted deviatoric strain rate
+			  dyy[L][j][i] += svCell->dyy * dz; // integrating dz-weighted deviatoric strain rate
+
+			  cdxx[L][j][i] += (svCell->sxx / (2 * svCell->svDev.eta)) * dz; // integrating dz-weighted deviatoric strain rate from stress
+			  cdyy[L][j][i] += (svCell->syy / (2 * svCell->svDev.eta)) * dz; // integrating dz-weighted deviatoric strain rate from stress
+
+			  britthick[L][j][i] += dz; // integrating brittle layer thickness
+
+			  if (sFlag == 1) // during dike locate step *djking
 			  {
 				  ogsxx[L][j][i] += (svCell->hxx - svCell->svBulk.pn) * dz; // integrating dz-weighted total history stress
 			  }
-			  else
+			  else // within picard iterations
 			  {
-				  ogsxx[L][j][i] += (svCell->sxx - Pc[L][j][i]) * dz; // integrating dz-weighted total history stress
+				  if (iteration == 0)
+				  {
+					  ogsxx[L][j][i] += (svCell->hxx - svCell->svBulk.pn) * dz; // integrating dz-weighted total history stress
+				  }
+				  else
+				  {
+					  ogsxx[L][j][i] += (svCell->sxx - lp[k][j][i]) * dz; // integrating dz-weighted total history stress
+				  }
 			  }
+
+			  // OG formulas...
+			  // sxx[L][j][i]+=(svCell->hxx - svCell->svBulk.pn)*dz;  //integrating dz-weighted total history stress
+			  // sxx[L][j][i]+=svCell->hxx*dz;  //integrating dz-weighted deviatoric stress *djking
+			  // sxx[L][j][i]+=(svCell->sxx - lp[L][j][i])*dz;  //integrating dz-weighted total stress
+			  // sxx[L][j][i]+=(svCell->sxx)*dz;  //integrating dz-weighted total stress
+
+			  if (x_c < 0.3 && x_c > 0.0 && y_c == -1.5 && z_c < -3 && z_c > -3.3) // || ID==82702) *debugging
+			  {
+				  PetscCall(PetscPrintf(PETSC_COMM_WORLD, "sFlag=%d, x_c=%.2f, y_c=%.2f, z_c=%.2f, hxx=%.4e, hyy=%.4e, sxx=%.4e, syy=%.4e, dxx=%.4e, dyy=%.4e, hP=%.4e, Pc=%.4e, lithP=%.4e, cdxx=%.4e, cdyy=%.4e, eta=%.4e\n", sFlag, x_c, y_c, z_c, svCell->hxx, svCell->hyy, svCell->sxx, svCell->syy, svCell->dxx, svCell->dyy, svCell->svBulk.pn, lp[k][j][i], p_lith[k][j][i], svCell->sxx / (2 * svCell->svDev.eta), svCell->syy / (2 * svCell->svDev.eta), svCell->svDev.eta));
+			  }
+			  /* 			if (x_c<6.3 && x_c>6.0 && y_c==-1.5 && z_c<-3 && z_c>-3.3) // || ID==82702) *debugging
+						  {
+							  PetscCall(PetscPrintf(PETSC_COMM_WORLD, "sFlag=%d, x_c=%.2f, y_c=%.2f, z_c=%.2f, hxx=%.4e, hyy=%.4e, sxx=%.4e, syy=%.4e, dxx=%.4e, dyy=%.4e, hP=%.4e, Pc=%.4e, lithP=%.4e, cdxx=%.4e, cdyy=%.4e, eta=%.4e\n", sFlag, x_c, y_c, z_c, svCell->hxx, svCell->hyy, svCell->sxx, svCell->syy, svCell->dxx, svCell->dyy, svCell->svBulk.pn, lp[k][j][i], p_lith[k][j][i], svCell->sxx/(2*svCell->svDev.eta), svCell->syy/(2*svCell->svDev.eta), svCell->svDev.eta));
+						  }
+						  if (x_c<36.3 && x_c>36.0 && y_c==-1.5 && z_c<-3 && z_c>-3.3) // || ID==82702) *debugging
+						  {
+							  PetscCall(PetscPrintf(PETSC_COMM_WORLD, "sFlag=%d, x_c=%.2f, y_c=%.2f, z_c=%.2f, hxx=%.4e, hyy=%.4e, sxx=%.4e, syy=%.4e, dxx=%.4e, dyy=%.4e, hP=%.4e, Pc=%.4e, lithP=%.4e, cdxx=%.4e, cdyy=%.4e, eta=%.4e\n", sFlag, x_c, y_c, z_c, svCell->hxx, svCell->hyy, svCell->sxx, svCell->syy, svCell->dxx, svCell->dyy, svCell->svBulk.pn, lp[k][j][i], p_lith[k][j][i], svCell->sxx/(2*svCell->svDev.eta), svCell->syy/(2*svCell->svDev.eta), svCell->svDev.eta));
+						  } */
 		  }
 
-		  // OG formulas...
-		  // sxx[L][j][i]+=(svCell->hxx - svCell->svBulk.pn)*dz;  //integrating dz-weighted total history stress
-		  // sxx[L][j][i]+=svCell->hxx*dz;  //integrating dz-weighted deviatoric stress *djking
-		  // sxx[L][j][i]+=(svCell->sxx - lp[L][j][i])*dz;  //integrating dz-weighted total stress
-		  // sxx[L][j][i]+=(svCell->sxx)*dz;  //integrating dz-weighted total stress
-
-		  if (x_c < 0.3 && x_c > 0.0 && y_c == -1.5 && z_c < -3 && z_c > -3.3) // || ID==82702) *debugging
-		  {
-			  PetscCall(PetscPrintf(PETSC_COMM_WORLD, "sFlag=%d, x_c=%.2f, y_c=%.2f, z_c=%.2f, hxx=%.4e, hyy=%.4e, sxx=%.4e, syy=%.4e, dxx=%.4e, dyy=%.4e, hP=%.4e, Pc=%.4e, lithP=%.4e, cdxx=%.4e, cdyy=%.4e, eta=%.4e\n", sFlag, x_c, y_c, z_c, svCell->hxx, svCell->hyy, svCell->sxx, svCell->syy, svCell->dxx, svCell->dyy, svCell->svBulk.pn, lp[k][j][i], p_lith[k][j][i], svCell->sxx / (2 * svCell->svDev.eta), svCell->syy / (2 * svCell->svDev.eta), svCell->svDev.eta));
-		  }
-		  /* 			if (x_c<6.3 && x_c>6.0 && y_c==-1.5 && z_c<-3 && z_c>-3.3) // || ID==82702) *debugging
-					  {
-						  PetscCall(PetscPrintf(PETSC_COMM_WORLD, "sFlag=%d, x_c=%.2f, y_c=%.2f, z_c=%.2f, hxx=%.4e, hyy=%.4e, sxx=%.4e, syy=%.4e, dxx=%.4e, dyy=%.4e, hP=%.4e, Pc=%.4e, lithP=%.4e, cdxx=%.4e, cdyy=%.4e, eta=%.4e\n", sFlag, x_c, y_c, z_c, svCell->hxx, svCell->hyy, svCell->sxx, svCell->syy, svCell->dxx, svCell->dyy, svCell->svBulk.pn, lp[k][j][i], p_lith[k][j][i], svCell->sxx/(2*svCell->svDev.eta), svCell->syy/(2*svCell->svDev.eta), svCell->svDev.eta));
-					  }
-					  if (x_c<36.3 && x_c>36.0 && y_c==-1.5 && z_c<-3 && z_c>-3.3) // || ID==82702) *debugging
-					  {
-						  PetscCall(PetscPrintf(PETSC_COMM_WORLD, "sFlag=%d, x_c=%.2f, y_c=%.2f, z_c=%.2f, hxx=%.4e, hyy=%.4e, sxx=%.4e, syy=%.4e, dxx=%.4e, dyy=%.4e, hP=%.4e, Pc=%.4e, lithP=%.4e, cdxx=%.4e, cdyy=%.4e, eta=%.4e\n", sFlag, x_c, y_c, z_c, svCell->hxx, svCell->hyy, svCell->sxx, svCell->syy, svCell->dxx, svCell->dyy, svCell->svBulk.pn, lp[k][j][i], p_lith[k][j][i], svCell->sxx/(2*svCell->svDev.eta), svCell->syy/(2*svCell->svDev.eta), svCell->svDev.eta));
-					  } */
+		  /* 		PetscCall(PetscPrintf(PETSC_COMM_WORLD, "sFlag=%d, x_c=%.2f, y_c=%.2f, z_c=%.2f, hxx=%.4e, hyy=%.4e, sxx=%.4e, syy=%.4e, dxx=%.4e, dyy=%.4e, hP=%.4e, Pc=%.4e, lithP=%.4e, cdxx=%.4e, cdyy=%.4e, eta=%.4e\n", sFlag, x_c, y_c, z_c, svCell->hxx, svCell->hyy, svCell->sxx, svCell->syy, svCell->dxx, svCell->dyy, svCell->svBulk.pn, lp[k][j][i], p_lith[k][j][i], svCell->sxx/(2*svCell->svDev.eta), svCell->syy/(2*svCell->svDev.eta), svCell->svDev.eta)); */
 	  }
 
-	  /* 		PetscCall(PetscPrintf(PETSC_COMM_WORLD, "sFlag=%d, x_c=%.2f, y_c=%.2f, z_c=%.2f, hxx=%.4e, hyy=%.4e, sxx=%.4e, syy=%.4e, dxx=%.4e, dyy=%.4e, hP=%.4e, Pc=%.4e, lithP=%.4e, cdxx=%.4e, cdyy=%.4e, eta=%.4e\n", sFlag, x_c, y_c, z_c, svCell->hxx, svCell->hyy, svCell->sxx, svCell->syy, svCell->dxx, svCell->dyy, svCell->svBulk.pn, lp[k][j][i], p_lith[k][j][i], svCell->sxx/(2*svCell->svDev.eta), svCell->syy/(2*svCell->svDev.eta), svCell->svDev.eta)); */
-
-	  // interpolate depth to the solidus
-	  if ((Tc <= Tsol) && (Tsol < lT[k - 1][j][i]))
+	  // interpolate depth to the diking solidus
+	  if ((Tc <= T_dsol) && (T_dsol < lT[k - 1][j][i]))
 	  {
-		  zsol[L][j][i] = dsz->ccoor[k - sz] + (dsz->ccoor[k - sz - 1] - dsz->ccoor[k - sz]) / (lT[k - 1][j][i] - Tc) * (Tsol - Tc);
+		  zsol[L][j][i] = dsz->ccoor[k - sz] + (dsz->ccoor[k - sz - 1] - dsz->ccoor[k - sz]) / (lT[k - 1][j][i] - Tc) * (T_dsol - Tc);
 	  }
 
 	  END_PLANE_LOOP
   }
 
-	  //After integrating thickness and dz-weighted total stress, send it down to the next proc. 
-  if(dsz->nproc != 1 && dsz->grprev != -1)
+  // After integrating thickness and dz-weighted total stress, send it down to the next proc.
+  if (dsz->nproc != 1 && dsz->grprev != -1)
   {
-     ierr = MPI_Isend(lhxx, (PetscMPIInt)(nx*ny), MPIU_SCALAR, dsz->grprev, 0, PETSC_COMM_WORLD, &srequest); CHKERRQ(ierr);
-     ierr = MPI_Wait(&srequest, MPI_STATUSES_IGNORE);  CHKERRQ(ierr);
-     ierr = MPI_Isend(lhyy, (PetscMPIInt)(nx*ny), MPIU_SCALAR, dsz->grprev, 0, PETSC_COMM_WORLD, &srequest); CHKERRQ(ierr);
-     ierr = MPI_Wait(&srequest, MPI_STATUSES_IGNORE);  CHKERRQ(ierr);
-     ierr = MPI_Isend(lsxx, (PetscMPIInt)(nx*ny), MPIU_SCALAR, dsz->grprev, 0, PETSC_COMM_WORLD, &srequest); CHKERRQ(ierr);
-     ierr = MPI_Wait(&srequest, MPI_STATUSES_IGNORE);  CHKERRQ(ierr);
-     ierr = MPI_Isend(lsyy, (PetscMPIInt)(nx*ny), MPIU_SCALAR, dsz->grprev, 0, PETSC_COMM_WORLD, &srequest); CHKERRQ(ierr);
-     ierr = MPI_Wait(&srequest, MPI_STATUSES_IGNORE);  CHKERRQ(ierr);
-     ierr = MPI_Isend(ldxx, (PetscMPIInt)(nx*ny), MPIU_SCALAR, dsz->grprev, 0, PETSC_COMM_WORLD, &srequest); CHKERRQ(ierr);
-     ierr = MPI_Wait(&srequest, MPI_STATUSES_IGNORE);  CHKERRQ(ierr);
-     ierr = MPI_Isend(ldyy, (PetscMPIInt)(nx*ny), MPIU_SCALAR, dsz->grprev, 0, PETSC_COMM_WORLD, &srequest); CHKERRQ(ierr);
-     ierr = MPI_Wait(&srequest, MPI_STATUSES_IGNORE);  CHKERRQ(ierr);
-	 
-     ierr = MPI_Isend(lhP, (PetscMPIInt)(nx*ny), MPIU_SCALAR, dsz->grprev, 0, PETSC_COMM_WORLD, &srequest); CHKERRQ(ierr);
-     ierr = MPI_Wait(&srequest, MPI_STATUSES_IGNORE);  CHKERRQ(ierr);
-     ierr = MPI_Isend(lPc, (PetscMPIInt)(nx*ny), MPIU_SCALAR, dsz->grprev, 0, PETSC_COMM_WORLD, &srequest); CHKERRQ(ierr);
-     ierr = MPI_Wait(&srequest, MPI_STATUSES_IGNORE);  CHKERRQ(ierr);
-	 
-     ierr = MPI_Isend(llithP, (PetscMPIInt)(nx*ny), MPIU_SCALAR, dsz->grprev, 0, PETSC_COMM_WORLD, &srequest); CHKERRQ(ierr);
-     ierr = MPI_Wait(&srequest, MPI_STATUSES_IGNORE);  CHKERRQ(ierr);
-     ierr = MPI_Isend(lliththick, (PetscMPIInt)(nx*ny), MPIU_SCALAR, dsz->grprev, 0, PETSC_COMM_WORLD, &srequest); CHKERRQ(ierr);
-     ierr = MPI_Wait(&srequest, MPI_STATUSES_IGNORE);  CHKERRQ(ierr);
-	 
-     ierr = MPI_Isend(lcdxx, (PetscMPIInt)(nx*ny), MPIU_SCALAR, dsz->grprev, 0, PETSC_COMM_WORLD, &srequest); CHKERRQ(ierr);
-     ierr = MPI_Wait(&srequest, MPI_STATUSES_IGNORE);  CHKERRQ(ierr);
-     ierr = MPI_Isend(lcdyy, (PetscMPIInt)(nx*ny), MPIU_SCALAR, dsz->grprev, 0, PETSC_COMM_WORLD, &srequest); CHKERRQ(ierr);
-     ierr = MPI_Wait(&srequest, MPI_STATUSES_IGNORE);  CHKERRQ(ierr);
-	 
-     ierr = MPI_Isend(lzsol, (PetscMPIInt)(nx*ny), MPIU_SCALAR, dsz->grprev, 0, PETSC_COMM_WORLD, &srequest); CHKERRQ(ierr);
-     ierr = MPI_Wait(&srequest, MPI_STATUSES_IGNORE);  CHKERRQ(ierr);
-     
-	 ierr = MPI_Isend(logsxx, (PetscMPIInt)(nx*ny), MPIU_SCALAR, dsz->grprev, 0, PETSC_COMM_WORLD, &srequest); CHKERRQ(ierr); // *delete after debug
-     ierr = MPI_Wait(&srequest, MPI_STATUSES_IGNORE);  CHKERRQ(ierr); // *delete after debug
-  }
-      
+	  ierr = MPI_Isend(lhxx, (PetscMPIInt)(nx * ny), MPIU_SCALAR, dsz->grprev, 0, PETSC_COMM_WORLD, &srequest); CHKERRQ(ierr);
+	  ierr = MPI_Wait(&srequest, MPI_STATUSES_IGNORE); CHKERRQ(ierr);
+	  ierr = MPI_Isend(lhyy, (PetscMPIInt)(nx * ny), MPIU_SCALAR, dsz->grprev, 0, PETSC_COMM_WORLD, &srequest); CHKERRQ(ierr);
+	  ierr = MPI_Wait(&srequest, MPI_STATUSES_IGNORE); CHKERRQ(ierr);
+	  ierr = MPI_Isend(lsxx, (PetscMPIInt)(nx * ny), MPIU_SCALAR, dsz->grprev, 0, PETSC_COMM_WORLD, &srequest); CHKERRQ(ierr);
+	  ierr = MPI_Wait(&srequest, MPI_STATUSES_IGNORE); CHKERRQ(ierr);
+	  ierr = MPI_Isend(lsyy, (PetscMPIInt)(nx * ny), MPIU_SCALAR, dsz->grprev, 0, PETSC_COMM_WORLD, &srequest); CHKERRQ(ierr);
+	  ierr = MPI_Wait(&srequest, MPI_STATUSES_IGNORE); CHKERRQ(ierr);
+	  ierr = MPI_Isend(ldxx, (PetscMPIInt)(nx * ny), MPIU_SCALAR, dsz->grprev, 0, PETSC_COMM_WORLD, &srequest); CHKERRQ(ierr);
+	  ierr = MPI_Wait(&srequest, MPI_STATUSES_IGNORE); CHKERRQ(ierr);
+	  ierr = MPI_Isend(ldyy, (PetscMPIInt)(nx * ny), MPIU_SCALAR, dsz->grprev, 0, PETSC_COMM_WORLD, &srequest); CHKERRQ(ierr);
+	  ierr = MPI_Wait(&srequest, MPI_STATUSES_IGNORE); CHKERRQ(ierr);
+
+	  ierr = MPI_Isend(lhP, (PetscMPIInt)(nx * ny), MPIU_SCALAR, dsz->grprev, 0, PETSC_COMM_WORLD, &srequest); CHKERRQ(ierr);
+	  ierr = MPI_Wait(&srequest, MPI_STATUSES_IGNORE); CHKERRQ(ierr);
+	  ierr = MPI_Isend(lPc, (PetscMPIInt)(nx * ny), MPIU_SCALAR, dsz->grprev, 0, PETSC_COMM_WORLD, &srequest); CHKERRQ(ierr);
+	  ierr = MPI_Wait(&srequest, MPI_STATUSES_IGNORE); CHKERRQ(ierr);
+
+	  ierr = MPI_Isend(llithP, (PetscMPIInt)(nx * ny), MPIU_SCALAR, dsz->grprev, 0, PETSC_COMM_WORLD, &srequest); CHKERRQ(ierr);
+	  ierr = MPI_Wait(&srequest, MPI_STATUSES_IGNORE); CHKERRQ(ierr);
+	  ierr = MPI_Isend(lliththick, (PetscMPIInt)(nx * ny), MPIU_SCALAR, dsz->grprev, 0, PETSC_COMM_WORLD, &srequest); CHKERRQ(ierr);
+	  ierr = MPI_Wait(&srequest, MPI_STATUSES_IGNORE); CHKERRQ(ierr);
+	  
+	  ierr = MPI_Isend(lcdxx, (PetscMPIInt)(nx * ny), MPIU_SCALAR, dsz->grprev, 0, PETSC_COMM_WORLD, &srequest); CHKERRQ(ierr);
+	  ierr = MPI_Wait(&srequest, MPI_STATUSES_IGNORE); CHKERRQ(ierr);
+	  ierr = MPI_Isend(lcdyy, (PetscMPIInt)(nx * ny), MPIU_SCALAR, dsz->grprev, 0, PETSC_COMM_WORLD, &srequest); CHKERRQ(ierr);
+	  ierr = MPI_Wait(&srequest, MPI_STATUSES_IGNORE); CHKERRQ(ierr);
+	  
+	  ierr = MPI_Isend(lzsol, (PetscMPIInt)(nx * ny), MPIU_SCALAR, dsz->grprev, 0, PETSC_COMM_WORLD, &srequest); CHKERRQ(ierr);
+	  ierr = MPI_Wait(&srequest, MPI_STATUSES_IGNORE); CHKERRQ(ierr);
+	  
+	  ierr = MPI_Isend(logsxx, (PetscMPIInt)(nx * ny), MPIU_SCALAR, dsz->grprev, 0, PETSC_COMM_WORLD, &srequest); CHKERRQ(ierr); // *delete after debug
+	  ierr = MPI_Wait(&srequest, MPI_STATUSES_IGNORE); CHKERRQ(ierr); // *delete after debug
+
+	  ierr = MPI_Isend(lbritthick, (PetscMPIInt)(nx * ny), MPIU_SCALAR, dsz->grprev, 0, PETSC_COMM_WORLD, &srequest); CHKERRQ(ierr); // *djking
+	  ierr = MPI_Wait(&srequest, MPI_STATUSES_IGNORE); CHKERRQ(ierr); // *djking
+	}
+
 	//Now receive/send the answer from successive previous (underlying) procs so all procs have the answers
   if(dsz->nproc != 1 && dsz->grprev != -1)
   {
@@ -1151,6 +1181,9 @@ PetscErrorCode Compute_sxx_magP(JacRes *jr, PetscInt nD, PetscInt sFlag)
      
 	 ierr = MPI_Irecv(logsxx, (PetscMPIInt)(nx*ny), MPIU_SCALAR, dsz->grprev, 0, PETSC_COMM_WORLD, &rrequest); CHKERRQ(ierr); // *delete after debug
      ierr = MPI_Wait(&rrequest, MPI_STATUSES_IGNORE);  CHKERRQ(ierr); // *delete after debug
+
+	 ierr = MPI_Irecv(lbritthick, (PetscMPIInt)(nx*ny), MPIU_SCALAR, dsz->grprev, 0, PETSC_COMM_WORLD, &rrequest); CHKERRQ(ierr); // *djking
+	 ierr = MPI_Wait(&rrequest, MPI_STATUSES_IGNORE);  CHKERRQ(ierr); // *djking
 	}
 
   if(dsz->nproc != 1 && dsz->grnext != -1)
@@ -1188,6 +1221,9 @@ PetscErrorCode Compute_sxx_magP(JacRes *jr, PetscInt nD, PetscInt sFlag)
      
 	 ierr = MPI_Isend(logsxx, (PetscMPIInt)(nx*ny), MPIU_SCALAR, dsz->grnext, 0, PETSC_COMM_WORLD, &srequest); CHKERRQ(ierr); // *delete after debug
      ierr = MPI_Wait(&srequest, MPI_STATUSES_IGNORE);  CHKERRQ(ierr); // *delete after debug
+
+	 ierr = MPI_Isend(lbritthick, (PetscMPIInt)(nx*ny), MPIU_SCALAR, dsz->grnext, 0, PETSC_COMM_WORLD, &srequest); CHKERRQ(ierr); // *djking
+     ierr = MPI_Wait(&srequest, MPI_STATUSES_IGNORE);  CHKERRQ(ierr); // *djking
   }
 
   //now all cores in z have the same solution so give that to the stress array
@@ -1243,6 +1279,7 @@ PetscErrorCode Compute_sxx_magP(JacRes *jr, PetscInt nD, PetscInt sFlag)
 
 	// calculate depth average stresses, strain rate, and pressures
 	START_PLANE_LOOP
+	// first get melt pressure based on T structure at start of time step (during dike locate/phase transition)
 	if (sFlag == 1) // *djking
 	{
 		magP = 0;									 // set magP to zero
@@ -1258,23 +1295,25 @@ PetscErrorCode Compute_sxx_magP(JacRes *jr, PetscInt nD, PetscInt sFlag)
 		magPresence[L][j][i] = magma_presence;				  // *testing
 		focused_magPressure[L][j][i] = magP * magma_presence; // revisit and turn on magma_presence if needed *testing
 	}
+		// Brittle layer stresses calculated from T_brit (brittle-ductile transition)
+		ghxx_ave[L][j][i] = hxx[L][j][i] / britthick[L][j][i]; // Depth weighted mean history stress
+		ghyy_ave[L][j][i] = hyy[L][j][i] / britthick[L][j][i]; // Depth weighted mean history stress
+		gsxx_ave[L][j][i] = sxx[L][j][i] / britthick[L][j][i]; // Depth weighted mean stress
+		gsyy_ave[L][j][i] = syy[L][j][i] / britthick[L][j][i]; // Depth weighted mean stress
+		gdxx_ave[L][j][i] = dxx[L][j][i] / britthick[L][j][i]; // Depth weighted mean strain rate
+		gdyy_ave[L][j][i] = dyy[L][j][i] / britthick[L][j][i]; // Depth weighted mean strain rate
+		
+		// *delete after debug
+		gsxx_eff_ave[L][j][i] = ogsxx[L][j][i] / britthick[L][j][i]; // Depth weighted mean total stress
+		raw_gsxx[L][j][i] = ogsxx[L][j][i] / britthick[L][j][i]; // Depth weighted mean total stress
+		raw_gsxx_ave[L][j][i] = ogsxx[L][j][i] / britthick[L][j][i]; // Depth weighted mean total stress
+		smooth_gsxx[L][j][i] = ogsxx[L][j][i] / britthick[L][j][i]; // Depth weighted mean total stress
+		smooth_gsxx_ave[L][j][i] = ogsxx[L][j][i] / britthick[L][j][i]; // Depth weighted mean total stress
 
-		ghxx_ave[L][j][i] = hxx[L][j][i] / liththick[L][j][i]; // Depth weighted mean history stress
-		ghyy_ave[L][j][i] = hyy[L][j][i] / liththick[L][j][i]; // Depth weighted mean history stress
-		gsxx_ave[L][j][i] = sxx[L][j][i] / liththick[L][j][i]; // Depth weighted mean stress
-		gsyy_ave[L][j][i] = syy[L][j][i] / liththick[L][j][i]; // Depth weighted mean stress
-		gdxx_ave[L][j][i] = dxx[L][j][i] / liththick[L][j][i]; // Depth weighted mean strain rate
-		gdyy_ave[L][j][i] = dyy[L][j][i] / liththick[L][j][i]; // Depth weighted mean strain rate
+		// Lithospheric average pressure calculated from solidus
 		ghP_ave[L][j][i] = hP[L][j][i] / liththick[L][j][i]; // Depth weighted mean history pressure
 		gPc_ave[L][j][i] = Pc[L][j][i] / liththick[L][j][i]; // Depth weighted mean pressure
 		glithP_ave[L][j][i] = lithP[L][j][i] / liththick[L][j][i]; // Depth weighted mean lithostatic pressure
-		
-		// *delete after debug
-		gsxx_eff_ave[L][j][i] = ogsxx[L][j][i] / liththick[L][j][i]; // Depth weighted mean total stress
-		raw_gsxx[L][j][i] = ogsxx[L][j][i] / liththick[L][j][i]; // Depth weighted mean total stress
-		raw_gsxx_ave[L][j][i] = ogsxx[L][j][i] / liththick[L][j][i]; // Depth weighted mean total stress
-		smooth_gsxx[L][j][i] = ogsxx[L][j][i] / liththick[L][j][i]; // Depth weighted mean total stress
-		smooth_gsxx_ave[L][j][i] = ogsxx[L][j][i] / liththick[L][j][i]; // Depth weighted mean total stress
 
 		if (L == 0) // *djking *debugging
 		{
@@ -1282,7 +1321,7 @@ PetscErrorCode Compute_sxx_magP(JacRes *jr, PetscInt nD, PetscInt sFlag)
 			y_c = COORD_CELL(j, sy, fs->dsy);
 			if (x_c < 0.3 && x_c > 0.0 && y_c == -1.5)
 			{
-				PetscCall(PetscPrintf(PETSC_COMM_WORLD, "liththick=%.4e, zsol=%.4e, solidus=%.4e, horizontal stress=%.4e, magP=%.4e\n", liththick[L][j][i], zsol[L][j][i], solidus[L][j][i], gsxx_eff_ave[L][j][i], gmagPressure[L][j][i]));
+				PetscCall(PetscPrintf(PETSC_COMM_WORLD, "liththick=%.4e, britthick=%.4e, zsol=%.4e, solidus=%.4e, horizontal stress=%.4e, magP=%.4e\n", liththick[L][j][i], britthick[L][j][i], zsol[L][j][i], solidus[L][j][i], gsxx_eff_ave[L][j][i], gmagPressure[L][j][i]));
 			}
 		}
 
@@ -1316,6 +1355,7 @@ PetscErrorCode Compute_sxx_magP(JacRes *jr, PetscInt nD, PetscInt sFlag)
 					<< " " << gsyy_ave[L][j][i]
 					<< " " << gdxx_ave[L][j][i]
 					<< " " << gdyy_ave[L][j][i]
+					<< " " << britthick[L][j][i]
 					<< " " << ghP_ave[L][j][i]
 					<< " " << gPc_ave[L][j][i]
 					<< " " << glithP_ave[L][j][i]
@@ -1371,6 +1411,7 @@ PetscErrorCode Compute_sxx_magP(JacRes *jr, PetscInt nD, PetscInt sFlag)
 	ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, vcdyy, &cdyy); CHKERRQ(ierr);
 	ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, vzsol, &zsol); CHKERRQ(ierr);
 	ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, vogsxx, &ogsxx); CHKERRQ(ierr); // *delete after debug
+	ierr = DMDAVecRestoreArray(jr->DA_CELL_2D, vbritthick, &britthick); CHKERRQ(ierr); // *djking
 
 	ierr = VecRestoreArray(vhxx, &lhxx); CHKERRQ(ierr);
 	ierr = VecRestoreArray(vhyy, &lhyy); CHKERRQ(ierr);
@@ -1386,6 +1427,7 @@ PetscErrorCode Compute_sxx_magP(JacRes *jr, PetscInt nD, PetscInt sFlag)
 	ierr = VecRestoreArray(vcdyy, &lcdyy); CHKERRQ(ierr);
 	ierr = VecRestoreArray(vzsol, &lzsol); CHKERRQ(ierr);
 	ierr = VecRestoreArray(vogsxx, &logsxx); CHKERRQ(ierr); // *delete after debug
+	ierr = VecRestoreArray(vliththick, &lliththick); CHKERRQ(ierr); // *djking
 
 	ierr = DMRestoreGlobalVector(jr->DA_CELL_2D, &vhxx); CHKERRQ(ierr);
 	ierr = DMRestoreGlobalVector(jr->DA_CELL_2D, &vhyy); CHKERRQ(ierr);
@@ -1401,6 +1443,7 @@ PetscErrorCode Compute_sxx_magP(JacRes *jr, PetscInt nD, PetscInt sFlag)
 	ierr = DMRestoreGlobalVector(jr->DA_CELL_2D, &vcdyy); CHKERRQ(ierr);
 	ierr = DMRestoreGlobalVector(jr->DA_CELL_2D, &vzsol); CHKERRQ(ierr);
 	ierr = DMRestoreGlobalVector(jr->DA_CELL_2D, &vogsxx); CHKERRQ(ierr); // *delete after debug
+	ierr = DMRestoreGlobalVector(jr->DA_CELL_2D, &vbritthick); CHKERRQ(ierr); // *djking
 
 	//fill ghost points
 
@@ -1772,12 +1815,12 @@ PetscErrorCode Smooth_sxx_eff(JacRes *jr, PetscInt nD, PetscInt nPtr, PetscInt  
 		sxx_ave[L][j][i]=gsxx_ave[L][j][i];
 		syy_ave[L][j][i]=gsyy_ave[L][j][i];
 		dxx_ave[L][j][i]=gdxx_ave[L][j][i];
-		dxx_ave[L][j][i]=gdxx_ave[L][j][i];
+		dyy_ave[L][j][i]=gdyy_ave[L][j][i];
 		hP_ave[L][j][i]=ghP_ave[L][j][i];
 		Pc_ave[L][j][i]=gPc_ave[L][j][i];
 		lithP_ave[L][j][i]=glithP_ave[L][j][i];
 
-		if (L == 0) // *djking *debugging
+/* 		if (L == 0) // *djking *debugging
 		{
 			xc = COORD_CELL(i, sx, fs->dsx);
 			yc = COORD_CELL(j, sy, fs->dsy);
@@ -1785,7 +1828,7 @@ PetscErrorCode Smooth_sxx_eff(JacRes *jr, PetscInt nD, PetscInt nPtr, PetscInt  
 			{
 				PetscCall(PetscPrintf(PETSC_COMM_WORLD, "PRESMOOTH: gsxx=%.4e, sxx=%.4e, magP=%.4e\n", sxx[L][j][i] + magP[L][j][i], sxx[L][j][i], magP[L][j][i]));
 			}
-		}
+		} */
 
 	END_PLANE_LOOP
   
@@ -2100,7 +2143,8 @@ PetscErrorCode Smooth_sxx_eff(JacRes *jr, PetscInt nD, PetscInt nPtr, PetscInt  
 		for (i = sx; i < sx+nx; i++)  
 		{
 			sum_sxx=0.0;
-			if (sFlag == 1) // *djking
+
+			if (sFlag == 1) // magP is calculated from start of time step only
 			{
 				sum_magP = 0.0;
 			}
@@ -2151,7 +2195,8 @@ PetscErrorCode Smooth_sxx_eff(JacRes *jr, PetscInt nD, PetscInt nPtr, PetscInt  
 					{
 						w=exp(-0.5*(pow((dxazim/filtx),2) + pow((dyazim/(str_y*filty)),2)))*dx*dy;
 						sum_sxx += sxx_prev[L][jj][ii]*w;
-						if (sFlag == 1) // *djking
+
+						if (sFlag == 1) // magP is calculated from start of time step only
 						{
 							sum_magP += magP_prev[L][jj][ii] * w;
 						}
@@ -2191,7 +2236,8 @@ PetscErrorCode Smooth_sxx_eff(JacRes *jr, PetscInt nD, PetscInt nPtr, PetscInt  
 					{
 						w=exp(-0.5*(pow((dxazim/filtx),2) + pow((dyazim/(str_y*filty)),2)))*dx*dy;
 						sum_sxx += sxx[L][jj][ii]*w;
-						if (sFlag == 1) // *djking
+
+						if (sFlag == 1) // magP is calculated from start of time step only
 						{
 							sum_magP += magP[L][jj][ii] * w;
 						}
@@ -2231,7 +2277,8 @@ PetscErrorCode Smooth_sxx_eff(JacRes *jr, PetscInt nD, PetscInt nPtr, PetscInt  
 					{
 						w=exp(-0.5*(pow((dxazim/filtx),2) + pow((dyazim/(str_y*filty)),2)))*dx*dy;
 						sum_sxx += sxx_next[L][jj][ii]*w;
-						if (sFlag == 1) // *djking
+
+						if (sFlag == 1) // magP is calculated from start of time step only
 						{
 							sum_magP += magP_next[L][jj][ii] * w;
 						}
@@ -2256,10 +2303,12 @@ PetscErrorCode Smooth_sxx_eff(JacRes *jr, PetscInt nD, PetscInt nPtr, PetscInt  
 			focused_magPressure[L][j][i]=(sum_magP/sum_w)*magPfac*exp(-0.5*(pow((cos(azim)*(xcent-xc)/magPwidth),2)));
 			smooth_gsxx[L][j][i]=(sum_sxx/sum_w);
 			smooth_gsxx_ave[L][j][i]=(sum_sxx/sum_w);
-			if (sFlag == 1) // *djking
+
+			if (sFlag == 1) // magP is calculated from start of time step only
 			{
 				gmagPressure[L][j][i] = (sum_magP / sum_w);
 			}
+
 			gsxx_eff_ave[L][j][i]=(sum_sxx/sum_w) + gmagPressure[L][j][i];
 			//gsxx_eff_ave[L][j][i]=(sum_sxx/sum_w) + focused_magPressure[L][j][i]; // *testing
 			
@@ -2273,20 +2322,21 @@ PetscErrorCode Smooth_sxx_eff(JacRes *jr, PetscInt nD, PetscInt nPtr, PetscInt  
 			ghP_ave_smooth[L][j][i]=(sum_ave_hP/sum_w);
 			gPc_ave_smooth[L][j][i]=(sum_ave_Pc/sum_w);
 			glithP_ave_smooth[L][j][i]=(sum_ave_lithP/sum_w);
-			if (sFlag == 1) // *djking
+
+			if (sFlag == 1) // magP is calculated from start of time step only
 			{
 				gmagPressure_smooth[L][j][i] = (sum_magP / sum_w);
 			}
 
-			if (L == 0) // *djking *debugging
+/* 			if (L == 0) // *djking *debugging
 			{
 				xc = COORD_CELL(i, sx, fs->dsx);
 				yc = COORD_CELL(j, sy, fs->dsy);
 				if (xc < 0.3 && xc > 0.0 && yc == -1.5)
 				{
-					PetscCall(PetscPrintf(PETSC_COMM_WORLD, "PRETIMEAVESMOOTH: gsxx=%.4e, sxx=%.4e, magP=%.4e\n", gsxx_eff_ave[L][j][i], ghxx_ave_smooth[L][j][i], gmagPressure_smooth[L][j][i]));
+					PetscCall(PetscPrintf(PETSC_COMM_WORLD, "PRETIMEAVESMOOTH: gsxx=%.4e, sxx=%.4e, magP=%.4e\n", gsxx_eff_ave[L][j][i], gsxx_ave_smooth[L][j][i], gmagPressure_smooth[L][j][i]));
 				}
-			}
+			} */
 
 		}//End loop over i
 	}// End loop over j
@@ -2478,7 +2528,10 @@ PetscErrorCode Smooth_sxx_eff(JacRes *jr, PetscInt nD, PetscInt nPtr, PetscInt  
 				sum_ave_hP = 0.0;
 				sum_ave_Pc = 0.0;
 				sum_ave_lithP = 0.0;
-				sum_magP = 0.0;
+/* 				if (sFlag == 1) // magP is calculated from start of time step only
+				{ */
+					sum_magP = 0.0;
+/* 				} */
 				ghxx_ave_hist[sisc+dike->istep_count][j][i]=ghxx_ave_smooth[L][j][i];  //array for current step
 				ghyy_ave_hist[sisc+dike->istep_count][j][i]=ghyy_ave_smooth[L][j][i];  //array for current step
 				gsxx_ave_hist[sisc+dike->istep_count][j][i]=gsxx_ave_smooth[L][j][i];  //array for current step
@@ -2497,8 +2550,8 @@ PetscErrorCode Smooth_sxx_eff(JacRes *jr, PetscInt nD, PetscInt nPtr, PetscInt  
  					sum_sxx_smooth+=smooth_gsxx_ave_hist[istep_count][j][i];
 					 
 					 // *djking
- 					sum_ave_hxx+=gdxx_ave_hist[istep_count][j][i];
- 					sum_ave_hyy+=gdyy_ave_hist[istep_count][j][i];
+ 					sum_ave_hxx+=ghxx_ave_hist[istep_count][j][i];
+ 					sum_ave_hyy+=ghyy_ave_hist[istep_count][j][i];
  					sum_ave_sxx+=gsxx_ave_hist[istep_count][j][i];
  					sum_ave_syy+=gsyy_ave_hist[istep_count][j][i];
  					sum_ave_dxx+=gdxx_ave_hist[istep_count][j][i];
@@ -2506,7 +2559,8 @@ PetscErrorCode Smooth_sxx_eff(JacRes *jr, PetscInt nD, PetscInt nPtr, PetscInt  
  					sum_ave_hP+=ghP_ave_hist[istep_count][j][i];
  					sum_ave_Pc+=gPc_ave_hist[istep_count][j][i];
  					sum_ave_lithP+=glithP_ave_hist[istep_count][j][i];
-					if (sFlag == 1) // *djking
+
+					if (sFlag == 1) // magP is calculated from start of time step only
 					{
 						sum_magP += gmagPressure_hist[istep_count][j][i];
 					}
@@ -2526,12 +2580,13 @@ PetscErrorCode Smooth_sxx_eff(JacRes *jr, PetscInt nD, PetscInt nPtr, PetscInt  
 				ghP_ave_smooth[L][j][i]=sum_ave_hP/((PetscScalar)istep_nave);
 				gPc_ave_smooth[L][j][i]=sum_ave_Pc/((PetscScalar)istep_nave);
 				glithP_ave_smooth[L][j][i]=sum_ave_lithP/((PetscScalar)istep_nave);
-				if (sFlag == 1) // *djking
+
+				if (sFlag == 1) // magP is calculated from start of time step only
 				{
 					gmagPressure_smooth[L][j][i] = sum_magP / ((PetscScalar)istep_nave);
 				}
 
-				if (L == 0) // *djking *debugging
+/* 				if (L == 0) // *djking *debugging
 				{
 					xc = COORD_CELL(i, sx, fs->dsx);
 					yc = COORD_CELL(j, sy, fs->dsy);
@@ -2539,7 +2594,7 @@ PetscErrorCode Smooth_sxx_eff(JacRes *jr, PetscInt nD, PetscInt nPtr, PetscInt  
 					{
 						PetscCall(PetscPrintf(PETSC_COMM_WORLD, "POSTTIMEAVESMOOTH: gsxx=%.4e, sxx=%.4e?, magP=%.4e?\n", gsxx_eff_ave[L][j][i], ghxx_ave_smooth[L][j][i]+ghP_ave_smooth[L][j][i], gmagPressure_smooth[L][j][i]));
 					}
-				}
+				} */
 			}
 		}
 
