@@ -403,7 +403,7 @@ PetscErrorCode PVOutCreate(PVOut *pvout, FB *fb)
 
 	// check
 	if(!pvout->jr->ctrl.actTemp)             omask->energ_res = 0;   // heat diffusion is deactivated
-	if(!pvout->jr->ctrl.actTemp)             omask->heat_source = 0; // heat diffusion is deactivated // *djking
+	if(!pvout->jr->ctrl.actHeatZone)         omask->heat_source = 0; // heat zone is deactivated // *djking
 	if(!pvout->jr->ctrl.actDike)             omask->div_dike = 0;    // diking is deactivated // *djking
 	if( pvout->jr->ctrl.gwType == _GW_NONE_) omask->eff_press = 0;   // pore pressure is deactivated
 
@@ -539,7 +539,7 @@ PetscErrorCode PVOutCreateData(PVOut *pvout)
 	if(omask->cont_res)       OutVecCreate(&pvout->outvecs[iter++], jr, outbuf, "cont_res",       scal->lbl_strain_rate,      &PVOutWriteContRes,      1, NULL);
 	if(omask->energ_res)      OutVecCreate(&pvout->outvecs[iter++], jr, outbuf, "energ_res",      scal->lbl_dissipation_rate, &PVOutWritEnergRes,      1, NULL);
 	if(omask->vel_gr_tensor)  OutVecCreate(&pvout->outvecs[iter++], jr, outbuf, "vel_gr_tensor",  scal->lbl_strain_rate,      &PVOutWriteVelocityGr,   9, NULL);
-	if(omask->heat_source)    OutVecCreate(&pvout->outvecs[iter++], jr, outbuf, "rho_A",          scal->lbl_dissipation_rate, &PVOutWriteHeatSource,      1, NULL); // *djking
+	if(omask->heat_source)    OutVecCreate(&pvout->outvecs[iter++], jr, outbuf, "rho_A",          scal->lbl_dissipation_rate, &PVOutWriteHeatSource,   1, NULL); // *djking
 	if(omask->div_dike)       OutVecCreate(&pvout->outvecs[iter++], jr, outbuf, "div_dike",       scal->lbl_strain_rate,      &PVOutWriteDikeRHS,      1, NULL); // *djking
 
 

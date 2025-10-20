@@ -234,6 +234,9 @@ struct JacRes
 	Vec dc; // dike contribution to residual (source term RHS)
 	Vec hdc; // history dike contribution for var_M dike heating (source term RHS)
 
+	// ugly structure for global access to conditions related to variable velbot and variable M (diking) *djking
+	PetscScalar var_velbot[4];
+
 	// corner buffer
 	Vec lbcor; // local (ghosted)
 
