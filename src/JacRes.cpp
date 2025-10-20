@@ -1328,29 +1328,12 @@ PetscErrorCode JacResGetResidual(JacRes *jr)
 				dikeRHS = hdiv_dike + (1 - dike->damp) * (dikeRHS - hdiv_dike); // *djking if damping
 	
 				// sum total volumetric flux of dike material to calculate variable diking bottom velocity in *djking
-				PetscScalar yr, cm, dikeRHS_si, vel_dike, km;
-				yr = 3600*24*365.25;
-				cm = 1e2;
-				km = 1e3;
-				dikeRHS_si = dikeRHS*scal->strain_rate;
-				vel_dike = dikeRHS_si*yr*dx*km*cm;
-				vol_dike += (vel_dike/scal->velocity) * (dy/scal->length) * (dz/scal->length); 
-/* 				vol_dike += dikeRHS*dx*dy*dz;  */
-				
-				if (L == 0) // *djking *debugging
-				{
-					if (x_c < 0.3 && x_c > 0.0 && y_c == -1.5 && z_c<-3 && z_c>-3.3)
-					{
-					  PetscCall(PetscPrintf(PETSC_COMM_WORLD, "damp=%.2f, new_dikeRHS=%.4e\n", dike->damp, dikeRHS));
-					  PetscCall(PetscPrintf(PETSC_COMM_WORLD, "dikeRHS_si=%.4e, vel_dike=%.4e, vol_dike=%.4e\n", dikeRHS_si, vel_dike*scal->velocity, vol_dike));
-				  }
-			  }
+				vol_dike += dikeRHS*dx*dy*dz; 
 			}
-		  else
-		  {
-			  ierr = GetDikeContr(jr, svCell->phRat, jr->surf->AirPhase, dikeRHS, y_c, j - sy, 1.0, 1.0);
-			  CHKERRQ(ierr);
-		  }
+			else
+			{
+				ierr = GetDikeContr(jr, svCell->phRat, jr->surf->AirPhase, dikeRHS, y_c, j - sy, 1.0, 1.0); CHKERRQ(ierr);
+			}
 
 		  // strain rate before removing dike contribution
 		  bdxx = dxx[k][j][i];
