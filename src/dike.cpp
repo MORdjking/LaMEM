@@ -461,7 +461,7 @@ PetscErrorCode GetDikeContr(JacRes *jr,
 							// div_max = M_rat * 2 * (v_spread / (right - left)); // dike wide limit on divergence (right - left)
 							div_max = M_rat * 2 * (v_spread / dx); // element wide limit rather than dike wide
 
-							PetscCall(PetscPrintf(PETSC_COMM_WORLD, "oldDivMax=%.4e, newDivMax=%.4e, dikeWidth=%.4e, elementWidth=%.4e\n", M_rat * 2 * (v_spread / (right - left)), M_rat * 2 * (v_spread / dx), (right - left), dx));
+							// PetscCall(PetscPrintf(PETSC_COMM_WORLD, "oldDivMax=%.4e, newDivMax=%.4e, dikeWidth=%.4e, elementWidth=%.4e\n", M_rat * 2 * (v_spread / (right - left)), M_rat * 2 * (v_spread / dx), (right - left), dx)); // *debug output *djking
 
 /* 							// Strain rate dependent
 							M_rat = M; // M ratio *revisit to include global var_M
