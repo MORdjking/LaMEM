@@ -130,7 +130,7 @@ PetscErrorCode GetDikeContr(JacRes *jr,
                             PetscScalar &y_c,
                             PetscInt J,
                             PetscScalar sxx_eff_ave_cell,
-                            PetscScalar sr_max_cell);
+                            PetscScalar dx);
 
 // compute dike heat after Behn & Ito, 2008
 PetscErrorCode Dike_k_heatsource(JacRes *jr,

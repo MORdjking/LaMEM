@@ -1313,7 +1313,8 @@ PetscErrorCode JacResGetResidual(JacRes *jr)
 				hdiv_dike = div_dike[k][j][i]; // use previous iteration div_dike when damping *djking 
 				hdiv_dike_cell = hdiv_dike_test[k][j][i]; // previous time step div_dike *djking 
 				
-			  	ierr = GetDikeContr(jr, svCell->phRat, jr->surf->AirPhase, dikeRHS, y_c, j - sy, sxx_eff_ave_cell, sr_max_cell); CHKERRQ(ierr); // change to stress_max_cell once final processes in place *djking
+			  	ierr = GetDikeContr(jr, svCell->phRat, jr->surf->AirPhase, dikeRHS, y_c, j - sy, sxx_eff_ave_cell, dx); CHKERRQ(ierr); // temporarily modified for max element width in x *djking
+			  	// ierr = GetDikeContr(jr, svCell->phRat, jr->surf->AirPhase, dikeRHS, y_c, j - sy, sxx_eff_ave_cell, sr_max_cell); CHKERRQ(ierr); // change to stress_max_cell once final processes in place *djking
 
 				if (L == 0) // *djking *debugging
 				{
