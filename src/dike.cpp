@@ -458,8 +458,8 @@ PetscErrorCode GetDikeContr(JacRes *jr,
 
 							// OG M dependent
 							M_rat = M; // M ratio *revisit to include global var_M?
-							// div_max = M_rat * 2 * (v_spread / (right - left)); // dike wide limit on divergence (right - left)
-							div_max = M_rat * 2 * (v_spread / dx); // element wide limit rather than dike wide
+							div_max = M_rat * 2 * (v_spread / (right - left)); // dike wide limit on divergence (right - left)
+							// div_max = M_rat * 2 * (v_spread / dx); // element wide limit rather than dike wide
 
 							// PetscCall(PetscPrintf(PETSC_COMM_WORLD, "oldDivMax=%.4e, newDivMax=%.4e, dikeWidth=%.4e, elementWidth=%.4e\n", M_rat * 2 * (v_spread / (right - left)), M_rat * 2 * (v_spread / dx), (right - left), dx)); // *debug output *djking
 
@@ -1286,11 +1286,12 @@ PetscErrorCode Compute_sxx_magP(JacRes *jr, PetscInt nD, PetscInt sFlag)
 	if (sFlag == 1) // *djking
 	{
 		magP = 0;									 // set magP to zero
-/* 		magP = (-14) * (dike->drhomagma) * grav[2];	 // SET EXCESS MAGMA PRESSURE */
 		magma_presence = 0;							 // testing
 		if (dike->zmax_magma - solidus[L][j][i] < 0) // if negative, then postive magma pressure at solidus exists
 		{
-			magP = dike->magPMeltFrac*(dike->zmax_magma - solidus[L][j][i]) * (dike->drhomagma) * grav[2];									// excess magma pressure at solidus
+			magP = 24.79055;	 // SET EXCESS MAGMA PRESSURE (MPa)
+			magP /= scal->stress_si; // scale prescribed magP
+			// magP = dike->magPMeltFrac*(dike->zmax_magma - solidus[L][j][i]) * (dike->drhomagma) * grav[2];  // excess magma pressure at solidus
 			magma_presence = dike->magPfac * (solidus[L][j][i] - dike->zmax_magma) / (zsol_max_global - dike->zmax_magma); // undergoing testing
 		}
 		// gmagPressure[L][j][i] = (lithP[L][j][i]/liththick[L][j][i]+magP)*magma_presence;
