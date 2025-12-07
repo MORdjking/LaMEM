@@ -1289,8 +1289,8 @@ PetscErrorCode Compute_sxx_magP(JacRes *jr, PetscInt nD, PetscInt sFlag)
 		magma_presence = 0;							 // testing
 		if (dike->zmax_magma - solidus[L][j][i] < 0) // if negative, then postive magma pressure at solidus exists
 		{
-			magP = 24.79055;	 // SET EXCESS MAGMA PRESSURE (MPa)
-			magP /= scal->stress_si; // scale prescribed magP
+			magP = 24.79055e6;	 // SET EXCESS MAGMA PRESSURE (Pa)
+			magP /= jr->scal->stress_si; // scale prescribed magP
 			// magP = dike->magPMeltFrac*(dike->zmax_magma - solidus[L][j][i]) * (dike->drhomagma) * grav[2];  // excess magma pressure at solidus
 			magma_presence = dike->magPfac * (solidus[L][j][i] - dike->zmax_magma) / (zsol_max_global - dike->zmax_magma); // undergoing testing
 		}
