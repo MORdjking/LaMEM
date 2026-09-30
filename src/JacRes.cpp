@@ -1483,7 +1483,7 @@ PetscErrorCode JacResGetResidual(JacRes *jr)
 	
 		A_side = jr->var_velbot[1] * jr->var_velbot[2]; // area of solid material exiting the sides of the model; y*z
 		A_bottom = jr->var_velbot[0] * jr->var_velbot[1]; // area in which material enters the bottom of the model; x*y
-		jr->var_velbot[3] = vol_dike;
+		PetscCallMPI(MPI_Allreduce(vol_dike, jr->var_velbot[3], 1, MPIU_SCALAR, MPI_SUM, PETSC_COMM_WORLD));
 		bc->velbot = (2*A_side*fabs(bc->velin) - jr->var_velbot[3]) / (A_bottom);
 
 		// print values for variable velbot debugging *djking
